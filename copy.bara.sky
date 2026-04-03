@@ -1,0 +1,18 @@
+core.workflow(
+    name = "default",
+    origin = git.origin(
+        url = "git@github.com:wmurra/abrasive.git",
+        ref = "master",
+    ),
+    destination = git.github_destination(
+        url = "git@github.com:wmurra/abrasive-cli.git",
+        push = "main",
+    ),
+    origin_files = glob(
+        include = ["cli/**"],
+    ),
+    authoring = authoring.pass_thru("William Murray <wmurra@users.noreply.github.com>"),
+    transformations = [
+        core.move("cli/", ""),
+    ],
+)
