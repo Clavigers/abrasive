@@ -1,0 +1,12 @@
+{
+  "name": "abrasive-website",
+  "type": "module",
+  "scripts": {
+    "dev": "bunx --bun astro dev",
+    "build": "bunx --bun astro build",
+    "preview": "bunx --bun astro preview"
+  },
+  "dependencies": {
+    "astro": "^5"
+  }
+}

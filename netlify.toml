@@ -1,0 +1,4 @@
+[build]
+  base = "wasteland/website"
+  command = "bunx --bun astro build"
+  publish = "dist"

@@ -1,0 +1,121 @@
+#!/bin/sh
+set -eu
+
+#region logging
+if [ "${ABRASIVE_DEBUG-}" = "true" ] || [ "${ABRASIVE_DEBUG-}" = "1" ]; then
+  debug() {
+    echo "$@" >&2
+  }
+else
+  debug() {
+    :
+  }
+fi
+
+if [ "${ABRASIVE_QUIET-}" = "1" ] || [ "${ABRASIVE_QUIET-}" = "true" ]; then
+  info() {
+    :
+  }
+else
+  info() {
+    echo "$@" >&2
+  }
+fi
+
+error() {
+  echo "$@" >&2
+  exit 1
+}
+#endregion
+
+#region environment detection
+get_os() {
+  os="$(uname -s)"
+  if [ "$os" = Linux ]; then
+    echo "linux"
+  elif [ "$os" = Darwin ]; then
+    echo "macos"
+  else
+    error "unsupported OS: $os"
+  fi
+}
+
+get_arch() {
+  arch="$(uname -m)"
+  if [ "$arch" = x86_64 ]; then
+    echo "x64"
+  elif [ "$arch" = aarch64 ] || [ "$arch" = arm64 ]; then
+    echo "arm64"
+  else
+    error "unsupported architecture: $arch"
+  fi
+}
+#endregion
+
+download_file() {
+  url="$1"
+  dest="$2"
+
+  if command -v curl >/dev/null 2>&1; then
+    debug ">" curl -fsSL -o "$dest" "$url"
+    curl -fsSL -o "$dest" "$url"
+  elif command -v wget >/dev/null 2>&1; then
+    debug ">" wget -qO "$dest" "$url"
+    wget -qO "$dest" "$url"
+  else
+    error "abrasive: install requires curl or wget but neither is installed. Aborting."
+  fi
+}
+
+install_abrasive() {
+  version="${ABRASIVE_VERSION:-latest}"
+  os="$(get_os)"
+  arch="$(get_arch)"
+  install_path="${ABRASIVE_INSTALL_PATH:-$HOME/.local/bin/abrasive}"
+  install_dir="$(dirname "$install_path")"
+
+  # TODO: update this URL once release artifacts are hosted
+  tarball_url="https://github.com/wmurra/abrasive/releases/download/${version}/abrasive-${os}-${arch}.tar.gz"
+
+  info "abrasive: detected ${os} ${arch}"
+  info "abrasive: downloading from ${tarball_url}..."
+
+  download_dir="$(mktemp -d)"
+  download_file "$tarball_url" "$download_dir/abrasive.tar.gz"
+
+  mkdir -p "$install_dir"
+  tar -xzf "$download_dir/abrasive.tar.gz" -C "$download_dir"
+  mv "$download_dir/abrasive" "$install_path"
+  chmod +x "$install_path"
+
+  rm -rf "$download_dir"
+
+  info "abrasive: installed successfully to $install_path"
+}
+
+after_finish_help() {
+  case "${SHELL:-}" in
+  */zsh)
+    info ""
+    info "abrasive: ensure ~/.local/bin is in your PATH:"
+    info "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+    ;;
+  */bash)
+    info ""
+    info "abrasive: ensure ~/.local/bin is in your PATH:"
+    info "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+    ;;
+  */fish)
+    info ""
+    info "abrasive: ensure ~/.local/bin is in your PATH:"
+    info "  fish_add_path ~/.local/bin"
+    ;;
+  *)
+    info ""
+    info "abrasive: run \`$install_path --help\` to get started"
+    ;;
+  esac
+}
+
+install_abrasive
+after_finish_help

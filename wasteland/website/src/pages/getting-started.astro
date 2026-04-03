@@ -1,0 +1,185 @@
+---
+import Base from '../layouts/Base.astro';
+---
+<Base title="abrasive - get started">
+  <main>
+    <section class="step">
+      <h2>If you haven't already, install abrasive</h2>
+      <div class="install">
+        <p class="label">Install</p>
+        <div class="install-inner">
+          <div class="code-block">
+            <code id="install-cmd">curl https://abrasive.dev/get | sh</code>
+            <button class="copy-btn" data-cmd="install-cmd" aria-label="Copy to clipboard">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25z"/>
+                <path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25z"/>
+              </svg>
+            </button>
+          </div>
+          <a href="/get_abrasive" class="more-methods">More installation methods &rarr;</a>
+        </div>
+      </div>
+    </section>
+
+    <section class="step">
+      <h2>Set up a cargo alias <span class="optional">(optional)</span></h2>
+      <p class="desc">Command line compatible with Cargo. Alias <code class="inline">cargo=abrasive</code> and keep using cargo the way you normally would. Fully open source and MIT licensed.</p>
+      <p class="desc">Add an alias to your shell config:</p>
+      <div class="code-block">
+        <code id="alias-bash">echo 'alias cargo="abrasive"' >> ~/.bashrc && source ~/.bashrc</code>
+        <button class="copy-btn" data-cmd="alias-bash" aria-label="Copy to clipboard">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25z"/>
+            <path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25z"/>
+          </svg>
+        </button>
+      </div>
+      <p class="desc">For zsh, replace <code class="inline">~/.bashrc</code> with <code class="inline">~/.zshrc</code>. For fish:</p>
+      <div class="code-block">
+        <code id="alias-fish">alias --save cargo="abrasive"</code>
+        <button class="copy-btn" data-cmd="alias-fish" aria-label="Copy to clipboard">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25z"/>
+            <path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25z"/>
+          </svg>
+        </button>
+      </div>
+      <p class="desc">Now <code class="inline">cargo setup</code>, <code class="inline">cargo build</code>, etc. will all route through abrasive.</p>
+    </section>
+
+    <section class="step">
+      <h2>Initialize your project</h2>
+      <p class="desc">Navigate to the root of your project and run:</p>
+      <div class="code-block">
+        <code id="setup-cmd">abrasive setup</code>
+        <button class="copy-btn" data-cmd="setup-cmd" aria-label="Copy to clipboard">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25z"/>
+            <path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25z"/>
+          </svg>
+        </button>
+      </div>
+      <p class="desc">Or if you set up the cargo alias:</p>
+      <div class="code-block">
+        <code id="setup-cargo-cmd">cargo setup</code>
+        <button class="copy-btn" data-cmd="setup-cargo-cmd" aria-label="Copy to clipboard">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25z"/>
+            <path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25z"/>
+          </svg>
+        </button>
+      </div>
+      <p class="desc">This walks you through an interactive setup and creates an <code class="inline">abrasive.toml</code> in the root of your project.</p>
+    </section>
+  </main>
+</Base>
+
+<style>
+  main {
+    display: flex;
+    flex-direction: column;
+    gap: 3rem;
+    max-width: 720px;
+    width: 100%;
+    align-items: flex-start;
+    padding-bottom: 4rem;
+  }
+  .step {
+    width: 100%;
+  }
+  h2 {
+    font-size: 1.4rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+  }
+  .optional {
+    color: var(--muted);
+    font-weight: 400;
+    font-size: 0.9rem;
+  }
+  .desc {
+    color: var(--fg);
+    font-size: 0.95rem;
+    line-height: 1.6;
+    margin-bottom: 0.75rem;
+  }
+  .inline {
+    color: var(--accent);
+    background: var(--code-bg);
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.85em;
+  }
+  .label {
+    color: var(--muted);
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.5rem;
+  }
+  .install-inner {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .code-block {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.75rem;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.9rem;
+    white-space: nowrap;
+    margin-bottom: 0.75rem;
+  }
+  .code-block code {
+    color: var(--accent);
+    user-select: all;
+    white-space: nowrap;
+  }
+  .copy-btn {
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    transition: color 0.15s;
+  }
+  .copy-btn:hover {
+    color: var(--fg);
+  }
+  .more-methods {
+    display: inline-block;
+    margin-top: 0.4rem;
+    color: var(--muted);
+    font-size: 0.8rem;
+    text-decoration: none;
+    transition: color 0.15s;
+  }
+  .more-methods:hover {
+    color: var(--fg);
+  }
+</style>
+
+<script>
+  const copyIcon = '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25z"/><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25z"/></svg>';
+  const checkIcon = '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"/></svg>';
+
+  document.querySelectorAll('.copy-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const cmdId = btn.getAttribute('data-cmd')!;
+      const code = document.getElementById(cmdId)!;
+      navigator.clipboard.writeText(code.textContent!);
+      btn.innerHTML = checkIcon;
+      setTimeout(() => { btn.innerHTML = copyIcon; }, 2000);
+    });
+  });
+</script>
