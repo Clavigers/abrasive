@@ -1,4 +1,4 @@
-name: Copybara
+name: Sync CLI to public repo
 
 on:
   push:
@@ -6,20 +6,31 @@ on:
       - master
     paths:
       - "wasteland/cli/**"
-      - "copy.bara.sky"
+      - ".github/workflows/copybara.yml"
 
 jobs:
-  copybara:
+  sync:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: olivr/copybara-action@v1.2.3
-        with:
-          ssh_key: ${{ secrets.COPYBARA_SSH_KEY }}
-          sot_repo: sadosystems/abrasive
-          sot_branch: master
-          destination_repo: sadosystems/abrasive-cli
-          destination_branch: main
-          workflow: init
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.COPYBARA_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -t ed25519,rsa github.com >> ~/.ssh/known_hosts
+
+      - name: Sync to abrasive-cli
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+
+          # Create a temporary branch with only cli contents at root
+          git subtree split --prefix=wasteland/cli -b cli-only
+
+          # Push to public repo
+          git remote add public git@github.com:sadosystems/abrasive-cli.git
+          git push public cli-only:main --force
