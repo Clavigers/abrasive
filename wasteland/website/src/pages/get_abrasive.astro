@@ -1,0 +1,147 @@
+---
+import Base from '../layouts/Base.astro';
+
+const methods = [
+  { id: 'curl', label: 'cURL', cmd: 'curl https://abrasive.dev/get | sh', color: '#073642', accent: '#2aa198', icon: '/icons/curl.svg', wide: true },
+  { id: 'homebrew', label: 'Homebrew', cmd: 'brew install abrasive', color: '#1e1206', accent: '#fbb040', icon: '/icons/homebrew.svg' },
+  { id: 'cargo', label: 'Cargo', cmd: 'cargo install abrasive', color: '#1a0f00', accent: '#dea584', icon: '/icons/cargo.png' },
+  { id: 'npm', label: 'npm', cmd: 'npm install -g abrasive', color: '#1a0000', accent: '#cb3837', icon: '/icons/npm.svg' },
+  { id: 'apt', label: 'Debian / Ubuntu', cmd: 'sudo apt install abrasive', color: '#0d0717', accent: '#a80030', icon: '/icons/apt.png' },
+  { id: 'dnf', label: 'Fedora / RHEL', cmd: 'sudo dnf install abrasive', color: '#0f1a2e', accent: '#51a2da', icon: '/icons/dnf.png' },
+  { id: 'pacman', label: 'Arch Linux', cmd: 'sudo pacman -S abrasive', color: '#0d1a2a', accent: '#1793d1', icon: '/icons/pacman.png' },
+  { id: 'apk', label: 'Alpine', cmd: 'apk add abrasive', color: '#0a1520', accent: '#0d597f', icon: '/icons/apk.svg' },
+  { id: 'nix', label: 'Nix', cmd: 'nix-env -iA nixpkgs.abrasive', color: '#171b2e', accent: '#7ebae4', icon: '/icons/nix.svg' },
+  { id: 'docker', label: 'Docker', cmd: 'docker pull abrasive/abrasive:latest', color: '#0b1a2e', accent: '#2496ed', icon: '/icons/docker.png' },
+  { id: 'scoop', label: 'Scoop', cmd: 'scoop install abrasive', color: '#141422', accent: '#9b59b6', icon: '/icons/scoop.png' },
+  { id: 'choco', label: 'Chocolatey', cmd: 'choco install abrasive', color: '#1a1408', accent: '#80b5e3', icon: '/icons/choco.png' },
+];
+---
+<Base title="abrasive - install">
+  <main>
+    <h1>Get the Abrasive CLI</h1>
+    <div class="grid">
+      {methods.map((m) => (
+        <div class="card" style={`background: linear-gradient(180deg, ${m.accent}22 0%, var(--bg) 60%); --card-accent: ${m.accent};`}>
+          <img class={`card-icon ${m.wide ? 'wide' : ''}`} src={m.icon} alt={m.label} />
+          <h2 class="card-label">{m.label}</h2>
+          <div class="card-cmd">
+            <code>{m.cmd}</code>
+            <button class="copy-btn" data-cmd={m.cmd} aria-label="Copy to clipboard">
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+                <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25z"/>
+                <path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25z"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  </main>
+</Base>
+
+<style>
+  main {
+    width: 100%;
+    max-width: 1200px;
+    padding: 0 2rem;
+  }
+  h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    text-align: center;
+    margin-bottom: 2rem;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 0.5rem;
+    width: 100%;
+  }
+  .card {
+    border: none;
+    border-radius: 12px;
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.75rem;
+    position: relative;
+    overflow: hidden;
+    min-height: 180px;
+    transition: outline-color 0.15s;
+    outline: 1px solid transparent;
+  }
+  .card:hover {
+    outline-color: var(--card-accent);
+  }
+  .card-icon {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    width: 80px;
+    height: 80px;
+    object-fit: contain;
+    opacity: 1;
+    pointer-events: none;
+    border-radius: 12px;
+  }
+  .card-icon.wide {
+    width: 160px;
+    height: auto;
+  }
+  .card-label {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--fg);
+    z-index: 1;
+  }
+  .card-cmd {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 6px;
+    padding: 0.5rem 0.75rem;
+    width: 100%;
+  }
+  .card-cmd code {
+    color: var(--card-accent);
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.8rem;
+    white-space: nowrap;
+    overflow-x: auto;
+    flex: 1;
+    user-select: all;
+  }
+  .copy-btn {
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    transition: color 0.15s;
+  }
+  .copy-btn:hover {
+    color: var(--fg);
+  }
+</style>
+
+<script>
+  const copyIcon = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25z"/><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25z"/></svg>';
+  const checkIcon = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"/></svg>';
+
+  document.querySelectorAll('.copy-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const cmd = btn.getAttribute('data-cmd')!;
+      navigator.clipboard.writeText(cmd);
+      btn.innerHTML = checkIcon;
+      setTimeout(() => { btn.innerHTML = copyIcon; }, 2000);
+    });
+  });
+</script>

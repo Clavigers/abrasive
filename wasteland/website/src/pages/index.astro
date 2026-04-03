@@ -1,0 +1,143 @@
+---
+import Base from '../layouts/Base.astro';
+import { Image } from 'astro:assets';
+import abrasiveBlock from '../abrasive_block.png';
+---
+<Base title="abrasive">
+  <main>
+    <Image src={abrasiveBlock} alt="ABRASIVE" class="logo" />
+    <div class="install">
+      <p class="label">Install</p>
+      <div class="install-inner">
+        <div class="code-block">
+          <code id="install-cmd">curl https://abrasive.dev/get | sh</code>
+          <button class="copy-btn" aria-label="Copy to clipboard">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25z"/>
+              <path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25z"/>
+            </svg>
+          </button>
+        </div>
+        <a href="/get_abrasive" class="more-methods">More installation methods &rarr;</a>
+      </div>
+    </div>
+    <div class="buttons">
+      <a href="/demo" class="btn">Demo &#9655;</a>
+      <a href="/getting-started" class="btn btn-primary">Get Started</a>
+    </div>
+    <div class="spacer"></div>
+  </main>
+</Base>
+
+<style>
+  .spacer {
+    min-height: 40vh;
+  }
+  main {
+    padding-top: 4rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1.5rem;
+  }
+  .logo {
+    width: 560px;
+    max-width: 90vw;
+    height: auto;
+    border-radius: 8px;
+  }
+  .label {
+    color: var(--muted);
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.5rem;
+  }
+  .code-block {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.75rem;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.9rem;
+    white-space: nowrap;
+  }
+  code {
+    color: var(--accent);
+    user-select: all;
+    white-space: nowrap;
+  }
+  .copy-btn {
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    transition: color 0.15s;
+  }
+  .copy-btn:hover {
+    color: var(--fg);
+  }
+  .install-inner {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .more-methods {
+    display: inline-block;
+    margin-top: 0.4rem;
+    color: var(--muted);
+    font-size: 0.8rem;
+    text-decoration: none;
+    transition: color 0.15s;
+  }
+  .more-methods:hover {
+    color: var(--fg);
+  }
+  .buttons {
+    display: flex;
+    gap: 1rem;
+  }
+  .btn {
+    padding: 0.6rem 1.5rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--fg);
+    text-decoration: none;
+    font-size: 0.9rem;
+    transition: border-color 0.15s, color 0.15s;
+  }
+  .btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .btn-primary {
+    background: linear-gradient(180deg, #e8b931, #d4872e);
+    border-color: #c47a28;
+    color: #0d1117;
+    font-weight: 700;
+  }
+  .btn-primary:hover {
+    background: linear-gradient(180deg, #f0c63d, #dc9233);
+    border-color: #ffffff;
+    color: #0d1117;
+  }
+</style>
+
+<script>
+  const btn = document.querySelector('.copy-btn')!;
+  const code = document.getElementById('install-cmd')!;
+  btn.addEventListener('click', () => {
+    navigator.clipboard.writeText(code.textContent!);
+    btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"/></svg>';
+    setTimeout(() => {
+      btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25z"/><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25z"/></svg>';
+    }, 2000);
+  });
+</script>
