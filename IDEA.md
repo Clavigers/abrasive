@@ -40,7 +40,7 @@ Claude said it thinks I should do this as a cargo plugin (which I think is what 
 
 The main prior art I have found myself so far (just by googling) is this:
 - https://github.com/sgeisler/cargo-remote
-- https://github.com/11amaharon/crunch
+- https://github.com/liamaharon/crunch
 
 I do not think any of these sensibly articulate the all important (Host | Exec | Target) relationship though which makes them feel sort of flabby to me.
 
