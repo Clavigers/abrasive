@@ -90,6 +90,8 @@ install_abrasive() {
   rm -rf "$download_dir"
 
   info "abrasive: installed successfully to $install_path"
+  info ""
+  info "abrasive: installation complete! Try it out with: abrasive --version"
 }
 
 after_finish_help() {
