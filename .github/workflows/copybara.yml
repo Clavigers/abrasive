@@ -19,4 +19,6 @@ jobs:
         with:
           ssh_key: ${{ secrets.COPYBARA_SSH_KEY }}
           sot_repo: sadosystems/abrasive
+          sot_branch: master
           destination_repo: sadosystems/abrasive-cli
+          destination_branch: main
