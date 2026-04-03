@@ -22,3 +22,4 @@ jobs:
           sot_branch: master
           destination_repo: sadosystems/abrasive-cli
           destination_branch: main
+          workflow: init
