@@ -1,0 +1,22 @@
+name: Copybara
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - "wasteland/cli/**"
+      - "copy.bara.sky"
+
+jobs:
+  copybara:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: olivr/copybara-action@v1.2.3
+        with:
+          ssh_key: ${{ secrets.COPYBARA_SSH_KEY }}
+          sot_repo: sadosystems/abrasive
+          destination_repo: sadosystems/abrasive-cli
