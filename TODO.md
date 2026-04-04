@@ -3,6 +3,7 @@
 
 [DESIGN] Convert the half slop image on the web page into a fully non slop vector thing
 
+[INFRA] Auto-deploy daemon to Hetzner on push to master (GitHub Actions: rsync daemon/, rebuild, restart systemd service) like netlify
 [INFRA] Get a real domain like abrasive-rs or abrasivebuild or something
 [INFRA] put abrasive on 1 million package managers
 
