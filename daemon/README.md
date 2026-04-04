@@ -1,0 +1,2 @@
+This is the Deamon / server thing that runs on the hetzner box, it is like a message broker / event broker thing
+right now all it does it just listen on :8400 and return 1 2 3 in successive responses to demo streaming responses. 

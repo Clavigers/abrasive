@@ -1,0 +1,14 @@
+# Abrasive CLI
+Fast Rust Builds
+
+For linux install with
+```shell 
+curl https://abrasive.netlify.app/get | sh
+```
+
+### Cargo and Abrasive
+
+The above command will install abrasive and add it to the path as abrasive, but 
+abrasive is designed to be used as a cargo alias. None of the regular Cargo commands 
+are broken by abrasive. If you run abrasive in a workspace that does not have an 
+abrasive.toml file, it will just pass straight through to cargo.
