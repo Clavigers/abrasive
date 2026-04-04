@@ -56,7 +56,23 @@ A compiler wrapper that intercepts individual rustc invocations (via `RUSTC_WRAP
 
 ### The approach we're considering
 
-Rather than trying to bolt REAPI onto cargo (which means fighting cargo's architecture to decompose builds into hermetic actions it wasn't designed to express), or wrapping rustc from outside like sccache (which throws away cargo's own incremental compilation): work *with* cargo. Run all builds (local and remote) inside VMs we control. Forge mtimes based on content hashes so cargo's existing fingerprinting system sees consistent state across machines. Share the `target/` directory (or a content-addressed store that populates it) between local and remote builds. Cargo's DAG, dependency resolution, and incremental compilation do all the real work — the new tool is just a thin layer making the environment consistent and the fingerprints portable. This sidesteps the problems the cargo team is struggling with on issue #5931 (build scripts invalidating everything downstream via fresh mtimes) because same content → same forged mtime → no spurious invalidation. Hermeticity is not enforced at authoring time but checked post hoc via environment fuzzing (see reproducibility verifier below).
+All builds happen on a shared remote server. Every developer's code is rsynced to the server and cargo runs there. This gives us a single machine with a single toolchain, single paths, single environment — no cross-machine consistency problems.
+
+The naive version of this is a shared `target/` directory, but that breaks under concurrent builds (cargo is not designed for multiple writers to the same `target/`). The Bazel solution is a content-addressed artifact store where actions have immutable inputs and outputs keyed by content hash. We want the same thing, but working *with* cargo instead of replacing it.
+
+**Architecture:**
+
+1. **Content-addressed artifact store** (shared, immutable, append-only) lives on the server. Key = hash of (source files + dependency artifacts + rustc version + flags + relevant env vars). Value = the compiled artifact. Multiple versions of the same crate coexist, keyed by different inputs.
+
+2. **Per-user `target/` directory** (mutable, ephemeral). Before cargo runs, abrasive populates it from the store — pulling in cached artifacts for any crate whose inputs haven't changed. After cargo runs, new artifacts are harvested into the store.
+
+3. **Mtime forging** is the critical glue. Cargo decides whether to rebuild a crate by comparing source file mtimes against artifact mtimes (plus fingerprints stored in `target/.fingerprint/`). When we pull a cached artifact from the store into a user's `target/`, cargo didn't compile it — it has no reason to trust it. We forge the artifact's mtime to match what cargo's fingerprinting expects (derived deterministically from content hashes: same content → same forged mtime). Cargo sees: source mtime < artifact mtime, fingerprint matches → skip rebuild. Without mtime forging, cargo would see unfamiliar timestamps and rebuild everything, defeating the cache entirely.
+
+4. **No concurrent write problem** because each user has their own `target/`. No redundant compilation because the store is shared. Cargo's native DAG, dependency resolution, and incremental compilation do all the real work — abrasive is a thin layer managing the store and making the per-user `target/` state consistent.
+
+This sidesteps the REAPI problem (decomposing cargo's build into hermetic actions it wasn't designed to express) and the sccache problem (wrapping rustc from outside, throwing away cargo's own incremental compilation). It also sidesteps the problems the cargo team is struggling with on issue #5931 (build scripts invalidating everything downstream via fresh mtimes) because same content → same forged mtime → no spurious invalidation.
+
+Hermeticity is not enforced at authoring time but checked post hoc via environment fuzzing (see reproducibility verifier below).
 
 [AI WRITTEN END]
 
