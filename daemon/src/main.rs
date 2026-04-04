@@ -37,13 +37,16 @@ fn handle(mut stream: TcpStream) {
         }
     };
 
-    let BuildRequest { cargo_args, subdir } = match msg {
+    let BuildRequest { cargo_args, subdir: _ } = match msg {
         Message::BuildRequest(req) => req,
         other => {
             println!("[{peer}] unexpected message: {other:?}");
             return;
         }
     };
+
+    // Convert `run` to `build` — the client runs the binary locally
+    let (cargo_args, _run_it) = rewrite_run_as_build(cargo_args);
 
     println!("[{peer}] cargo {}", cargo_args.join(" "));
 
@@ -101,6 +104,24 @@ fn handle(mut stream: TcpStream) {
     );
     println!("[{peer}] done");
 }
+
+/// Rewrites `run` to `build`, stripping args that come after `--`
+/// since those are runtime args, not build args. also returns a 
+/// flag indicating if run was found.
+fn rewrite_run_as_build(args: Vec<String>) -> (Vec<String>, bool) {
+      if args.first().map_or(true, |cmd| cmd != "run") {
+          return (args, false);
+      }
+
+      let mut out = vec!["build".to_string()];
+      for arg in args.into_iter().skip(1) {
+          if arg == "--" {
+              break;
+          }
+          out.push(arg);
+      }
+      (out, true)
+  }
 
 fn main() {
     let listener = TcpListener::bind("0.0.0.0:8400").unwrap();
