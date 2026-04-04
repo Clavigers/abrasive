@@ -1,28 +1,27 @@
+mod errors;
+
+use abrasive_protocol::{BuildRequest, Header, Message, decode, encode};
+use clap::builder::styling::{AnsiColor, Styles};
 use clap::{CommandFactory, Parser, Subcommand};
-use log::{debug, error, info};
-use serde::{Deserialize, Serialize};
+use errors::{CliError, CliResult};
 use std::io::{self, Read, Write};
+use std::net::{SocketAddr, TcpStream};
+use std::time::Duration;
 use std::{
-    env, fs,
+    env,
     path::{Path, PathBuf},
-    process::{Command as Cmd, ExitCode, Stdio, exit},
+    process::{Command as Cmd, ExitCode},
 };
 
-const HOST: &'static str = "http://157.180.55.180:8400";
-
-use clap::builder::styling::{AnsiColor, Styles};
+const IP: &str = "157.180.55.180";
+const PORT: u16 = 8400;
+const ADDR: (&str, u16) = (IP, PORT);
 
 const STYLES: Styles = Styles::styled()
     .header(AnsiColor::Yellow.on_default().bold())
     .usage(AnsiColor::Yellow.on_default().bold())
     .literal(AnsiColor::Yellow.on_default().bold())
     .placeholder(AnsiColor::Yellow.on_default());
-
-/// Message sent from the CLI to the build server
-#[derive(Debug, Serialize, Deserialize)]
-struct BuildRequest {
-    cargo_args: Vec<String>,
-}
 
 #[derive(Parser)]
 #[command(name = "abrasive", disable_version_flag = true, disable_help_flag = true, trailing_var_arg = true, styles = STYLES)]
@@ -85,35 +84,49 @@ fn login() {
     todo!("login")
 }
 
-fn forward_args_to_remote(cargo_args: Vec<String>) {
-    let request = BuildRequest { cargo_args };
-    let body = bincode::serialize(&request).expect("failed to serialize request");
-
-    let client = reqwest::blocking::Client::new();
-    let response = client
-        .post(format!("{HOST}/build"))
-        .header("Content-Type", "application/octet-stream")
-        .body(body)
-        .send();
-
-    match response {
-        Ok(mut resp) => {
-            let mut buf = [0u8; 4096];
-            loop {
-                match resp.read(&mut buf) {
-                    Ok(0) => break,
-                    Ok(n) => {
-                        let _ = io::stdout().write_all(&buf[..n]);
-                    }
-                    Err(e) => {
-                        eprintln!("Read error: {e}");
-                        break;
-                    }
-                }
-            }
-        }
+fn forward_args_to_remote(ctx: &WorkspaceContext, cargo_args: Vec<String>) -> ExitCode {
+    match try_remote(ctx, cargo_args) {
+        Ok(code) => code,
         Err(e) => {
-            eprintln!("Failed to connect to build server: {e}");
+            eprintln!("{e}");
+            e.exit_code()
+        }
+    }
+}
+
+fn try_remote(ctx: &WorkspaceContext, cargo_args: Vec<String>) -> CliResult<ExitCode> {
+    let addr: SocketAddr = format!("{}:{}", IP, PORT).parse().unwrap();
+    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5))
+        .map_err(CliError::Connect)?;
+    stream.set_read_timeout(Some(Duration::from_secs(300)))?;
+    stream.set_write_timeout(Some(Duration::from_secs(30)))?;
+
+    // TODO: sync files first
+
+    let subdir = ctx
+        .called_from_subdir
+        .as_ref()
+        .map(|p| p.to_string_lossy().to_string());
+    let frame = encode(&Message::BuildRequest(BuildRequest { cargo_args, subdir }));
+    stream.write_all(&frame)?;
+
+    loop {
+        let mut header_buf = [0u8; Header::SIZE];
+        stream.read_exact(&mut header_buf).map_err(|_| CliError::Disconnected)?;
+        let header = Header::from_bytes(&header_buf);
+        let mut raw = vec![0u8; Header::SIZE + header.length as usize];
+        raw[..Header::SIZE].copy_from_slice(&header_buf);
+        stream.read_exact(&mut raw[Header::SIZE..])?;
+        let frame = decode(&raw)?;
+
+        match frame.message {
+            Message::BuildOutput(data) => {
+                io::stdout().write_all(&data)?;
+            }
+            Message::BuildFinished { exit_code } => {
+                return Ok(ExitCode::from(exit_code));
+            }
+            _ => {}
         }
     }
 }
@@ -154,11 +167,10 @@ fn get_workspace() -> Option<WorkspaceContext> {
     config.map(|p| WorkspaceContext::from_paths(&p, &cwd))
 }
 
-/// Just Error and Exit right away if we cannot find cwd.
 fn get_cwd() -> PathBuf {
     env::current_dir().unwrap_or_else(|e| {
-        error!("Cannot determine current directory: {e}");
-        exit(1);
+        eprintln!("cannot determine current directory: {e}");
+        std::process::exit(1);
     })
 }
 
@@ -179,7 +191,38 @@ fn find_abrasive_toml(start: &Path) -> Option<PathBuf> {
     }
 }
 
-fn main() {
+/// Transparent on unix, probably close enough on windows
+fn forward_args_to_local() -> ExitCode {
+    let args: Vec<String> = env::args().skip(1).collect();
+    eprintln!("FORWARDING ARGS TO LOCAL");
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        let err = Cmd::new("cargo").args(&args).exec();
+        // only reaches here if exec failed
+        eprintln!("{err}");
+        ExitCode::from(127)
+    }
+
+    #[cfg(not(unix))]
+    {
+        let status = Cmd::new("cargo")
+            .args(&args)
+            .status()
+            .expect("cargo not found");
+        ExitCode::from(status.code().unwrap_or(1) as u8)
+    }
+}
+
+fn main() -> ExitCode {
+    // First, Check if we are in an abrasive workspace
+    // if not forward args to local cargo
+    let ctx = match get_workspace() {
+        None => return forward_args_to_local(),
+        Some(ctx) => ctx,
+    };
+
     let cli = Cli::parse();
 
     match cli.command {
@@ -189,6 +232,8 @@ fn main() {
         Some(Command::Help) => print_help(),
         Some(Command::Workspace) => print_workspace(),
         None if cli.cargo_args.is_empty() => print_help(),
-        None => forward_args_to_remote(cli.cargo_args),
+        None => return forward_args_to_remote(&ctx, cli.cargo_args),
     }
+
+    ExitCode::SUCCESS
 }
