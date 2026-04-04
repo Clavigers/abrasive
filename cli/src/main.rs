@@ -15,7 +15,7 @@ use std::{
 
 const IP: &str = "157.180.55.180";
 const PORT: u16 = 8400;
-const ADDR: (&str, u16) = (IP, PORT);
+const REMOTE_COMMANDS: &[&str] = &["build", "run", "test", "bench", "check", "clippy", "doc"];
 
 const STYLES: Styles = Styles::styled()
     .header(AnsiColor::Yellow.on_default().bold())
@@ -39,7 +39,6 @@ enum Command {
     /// Initialize abrasive for this project
     RemoteInit,
     /// Authenticate with the build server
-    #[command(visible_alias = "login")]
     Auth,
     /// Print abrasive and cargo versions
     #[command(name = "--version", aliases = ["-V"])]
@@ -85,6 +84,7 @@ fn login() {
 }
 
 fn forward_args_to_remote(ctx: &WorkspaceContext, cargo_args: Vec<String>) -> ExitCode {
+    eprintln!("REMOTE:");
     match try_remote(ctx, cargo_args) {
         Ok(code) => code,
         Err(e) => {
@@ -96,8 +96,8 @@ fn forward_args_to_remote(ctx: &WorkspaceContext, cargo_args: Vec<String>) -> Ex
 
 fn try_remote(ctx: &WorkspaceContext, cargo_args: Vec<String>) -> CliResult<ExitCode> {
     let addr: SocketAddr = format!("{}:{}", IP, PORT).parse().unwrap();
-    let mut stream = TcpStream::connect_timeout(&addr, Duration::from_secs(5))
-        .map_err(CliError::Connect)?;
+    let mut stream =
+        TcpStream::connect_timeout(&addr, Duration::from_secs(5)).map_err(CliError::Connect)?;
     stream.set_read_timeout(Some(Duration::from_secs(300)))?;
     stream.set_write_timeout(Some(Duration::from_secs(30)))?;
 
@@ -112,7 +112,9 @@ fn try_remote(ctx: &WorkspaceContext, cargo_args: Vec<String>) -> CliResult<Exit
 
     loop {
         let mut header_buf = [0u8; Header::SIZE];
-        stream.read_exact(&mut header_buf).map_err(|_| CliError::Disconnected)?;
+        stream
+            .read_exact(&mut header_buf)
+            .map_err(|_| CliError::Disconnected)?;
         let header = Header::from_bytes(&header_buf);
         let mut raw = vec![0u8; Header::SIZE + header.length as usize];
         raw[..Header::SIZE].copy_from_slice(&header_buf);
@@ -194,8 +196,6 @@ fn find_abrasive_toml(start: &Path) -> Option<PathBuf> {
 /// Transparent on unix, probably close enough on windows
 fn forward_args_to_local() -> ExitCode {
     let args: Vec<String> = env::args().skip(1).collect();
-    eprintln!("FORWARDING ARGS TO LOCAL");
-
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
@@ -215,6 +215,11 @@ fn forward_args_to_local() -> ExitCode {
     }
 }
 
+fn should_go_remote(args: &[String]) -> bool {
+    args.first()
+        .map_or(false, |cmd| REMOTE_COMMANDS.contains(&cmd.as_str()))
+}
+
 fn main() -> ExitCode {
     // First, Check if we are in an abrasive workspace
     // if not forward args to local cargo
@@ -223,8 +228,16 @@ fn main() -> ExitCode {
         Some(ctx) => ctx,
     };
 
-    let cli = Cli::parse();
+    // Check if the command is in the whitelist: REMOTE_COMMANDS
+    // only whitelisted commands will be run remotely, the rest
+    // uses local cargo 
+    let raw_args: Vec<String> = env::args().skip(1).collect();
+    if !should_go_remote(&raw_args) {
+        return forward_args_to_local();
+    }
 
+    // Things Abrasive handles
+    let cli = Cli::parse();
     match cli.command {
         Some(Command::RemoteInit) => remote_init(),
         Some(Command::Auth) => login(),
