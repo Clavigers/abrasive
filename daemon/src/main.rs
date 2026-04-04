@@ -13,7 +13,7 @@ fn recv_msg(stream: &mut TcpStream) -> std::io::Result<Message> {
     stream.read_exact(&mut raw[Header::SIZE..])?;
     decode(&raw)
         .map(|f| f.message)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))
 }
 
 fn send_msg(stream: &mut TcpStream, msg: &Message) -> std::io::Result<()> {

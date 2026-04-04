@@ -1,3 +1,7 @@
+mod errors;
+
+pub use errors::DecodeError;
+
 use serde::{Deserialize, Serialize};
 use std::mem;
 
@@ -61,8 +65,8 @@ pub fn encode(msg: &Message) -> Vec<u8> {
     frame
 }
 
-pub fn decode(raw: &[u8]) -> Result<Frame, bincode::Error> {
+pub fn decode(raw: &[u8]) -> Result<Frame, DecodeError> {
     let header = Header::from_bytes(raw[..Header::SIZE].try_into().unwrap());
-    let message = bincode::deserialize(&raw[Header::SIZE..])?;
+    let message = bincode::deserialize(&raw[Header::SIZE..]).map_err(DecodeError)?;
     Ok(Frame { header, message })
 }

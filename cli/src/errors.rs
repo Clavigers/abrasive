@@ -9,7 +9,7 @@ pub enum CliError {
     Io(#[from] std::io::Error),
 
     #[error("invalid response from build server: {0}")]
-    Protocol(#[from] Box<bincode::ErrorKind>),
+    Protocol(#[from] abrasive_protocol::DecodeError),
 
     #[error("server closed connection before build finished")]
     Disconnected,
