@@ -8,7 +8,7 @@ pub struct CliError {
 
 #[derive(Debug, thiserror::Error)]
 pub enum CliErrorKind {
-    #[error("failed to connect to build server: {0}")]
+    #[error("failed to connect to build servers: {0}")]
     Connect(std::io::Error),
 
     #[error("build server IO error: {0}")]

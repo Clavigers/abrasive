@@ -38,7 +38,8 @@ pub enum Message {
     SyncDone,
     SyncAck,
     BuildRequest(BuildRequest),
-    BuildOutput(Vec<u8>),
+    BuildStdout(Vec<u8>),
+    BuildStderr(Vec<u8>),
     BuildFinished { exit_code: u8 },
 }
 

@@ -104,43 +104,58 @@ fn handle(tcp_stream: TcpStream, tls_config: Arc<rustls::ServerConfig>) {
         Err(e) => {
             let _ = send_msg(
                 &mut stream,
-                &Message::BuildOutput(format!("failed to spawn cargo: {e}\n").into_bytes()),
+                &Message::BuildStderr(format!("failed to spawn cargo: {e}\n").into_bytes()),
             );
             let _ = send_msg(&mut stream, &Message::BuildFinished { exit_code: 1 });
             return;
         }
     };
 
-    // Note: can't clone a TLS stream, so we read stderr after stdout
-    let mut stdout = child.stdout.take().unwrap();
-    let mut stderr = child.stderr.take().unwrap();
-    let mut buf = [0u8; 4096];
+    // Merge stdout and stderr via a channel so they interleave naturally
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+    let (tx, rx) = std::sync::mpsc::channel::<Message>();
 
-    loop {
-        match stdout.read(&mut buf) {
-            Ok(0) | Err(_) => break,
-            Ok(n) => {
-                let _ = send_msg(&mut stream, &Message::BuildOutput(buf[..n].to_vec()));
+    let tx_out = tx.clone();
+    thread::spawn(move || {
+        let mut buf = [0u8; 4096];
+        let mut reader = stdout;
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => { let _ = tx_out.send(Message::BuildStdout(buf[..n].to_vec())); }
             }
         }
-    }
+    });
 
-    loop {
-        match stderr.read(&mut buf) {
-            Ok(0) | Err(_) => break,
-            Ok(n) => {
-                let _ = send_msg(&mut stream, &Message::BuildOutput(buf[..n].to_vec()));
+    let tx_err = tx;
+    thread::spawn(move || {
+        let mut buf = [0u8; 4096];
+        let mut reader = stderr;
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => { let _ = tx_err.send(Message::BuildStderr(buf[..n].to_vec())); }
             }
         }
+    });
+
+    for msg in rx {
+        let _ = send_msg(&mut stream, &msg);
     }
 
     let status = child.wait().unwrap();
-    let _ = send_msg(
+    if let Err(e) = send_msg(
         &mut stream,
         &Message::BuildFinished {
             exit_code: status.code().unwrap_or(1) as u8,
         },
-    );
+    ) {
+        println!("[{peer}] failed to send BuildFinished: {e}");
+    }
+    // Shut down TLS cleanly before dropping
+    let _ = stream.conn.send_close_notify();
+    let _ = stream.flush();
     println!("[{peer}] done");
 }
 

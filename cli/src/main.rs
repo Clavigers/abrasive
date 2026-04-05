@@ -119,8 +119,11 @@ fn try_remote(ctx: &WorkspaceContext, cargo_args: Vec<String>) -> CliResult<Exit
         let frame = decode(&raw)?;
 
         match frame.message {
-            Message::BuildOutput(data) => {
+            Message::BuildStdout(data) => {
                 io::stdout().write_all(&data)?;
+            }
+            Message::BuildStderr(data) => {
+                io::stderr().write_all(&data)?;
             }
             Message::BuildFinished { exit_code } => {
                 return Ok(ExitCode::from(exit_code));
