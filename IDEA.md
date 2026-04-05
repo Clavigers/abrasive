@@ -129,3 +129,9 @@ See https://github.com/DRMacIver/minithesis for a reference implementation.
 
 on a similar note, I have a few ideas for scans you could run on a rust project to throw off some warnings about reproducibility, for instance in the env! macro in rust grabs Environment variables at build time to configure the build of course these need to be in our dag for cache invalidation and if the build needs env vars set then those need to be in the vm running the remote build so we could scan the code for env! calls and warn there, we could also scan the build code for ANY io or randomness. I think this big source of nondeterminism that we will have to shrug and say skill issue to is racey build code. 
 
+
+HIGH QUALITY REFERENCES ON THIS TOPIC
+
+https://mmapped.blog/posts/17-scaling-rust-builds-with-bazel
+https://matklad.github.io/2021/09/04/fast-rust-builds.html 
+https://brokenco.de/2025/08/25/sccache-is-pretty-okay.html 
