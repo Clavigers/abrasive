@@ -60,13 +60,14 @@ fn print_help() {
 }
 
 /// Print the Abrasive workspace info
-fn print_workspace() {
-    match get_workspace() {
-        Some(ctx) => println!("{:?}, {:?}", ctx.root_dir, ctx.called_from_subdir),
+fn print_workspace() -> CliResult<()> {
+    match get_workspace()? {
+        Some(ctx) => println!("{:?}, {:?}", ctx.root_dir, ctx.subdir),
         None => println!(
             "This is not an abrasive workspace. abrasive commands run from here will pass through to cargo"
         ),
     }
+    Ok(())
 }
 
 /// Print the Abrasive help first, followed by the cargo help
@@ -83,38 +84,26 @@ fn login() {
     todo!("login")
 }
 
-fn forward_args_to_remote(ctx: &WorkspaceContext, cargo_args: Vec<String>) -> ExitCode {
-    eprintln!("REMOTE:");
-    match try_remote(ctx, cargo_args) {
-        Ok(code) => code,
-        Err(e) => {
-            eprintln!("{e}");
-            e.exit_code()
-        }
-    }
-}
-
 fn try_remote(ctx: &WorkspaceContext, cargo_args: Vec<String>) -> CliResult<ExitCode> {
     let addr: SocketAddr = format!("{}:{}", IP, PORT).parse().unwrap();
     let mut stream =
-        TcpStream::connect_timeout(&addr, Duration::from_secs(5)).map_err(CliError::Connect)?;
+        TcpStream::connect_timeout(&addr, Duration::from_secs(5)).map_err(CliError::connect)?;
     stream.set_read_timeout(Some(Duration::from_secs(300)))?;
     stream.set_write_timeout(Some(Duration::from_secs(30)))?;
 
     // TODO: sync files first
 
-    let subdir = ctx
-        .called_from_subdir
-        .as_ref()
-        .map(|p| p.to_string_lossy().to_string());
-    let frame = encode(&Message::BuildRequest(BuildRequest { cargo_args, subdir }));
+    let frame = encode(&Message::BuildRequest(BuildRequest {
+        cargo_args,
+        subdir: ctx.subdir.clone(),
+    }));
     stream.write_all(&frame)?;
 
     loop {
         let mut header_buf = [0u8; Header::SIZE];
         stream
             .read_exact(&mut header_buf)
-            .map_err(|_| CliError::Disconnected)?;
+            .map_err(|_| CliError::disconnected())?;
         let header = Header::from_bytes(&header_buf);
         let mut raw = vec![0u8; Header::SIZE + header.length as usize];
         raw[..Header::SIZE].copy_from_slice(&header_buf);
@@ -135,45 +124,40 @@ fn try_remote(ctx: &WorkspaceContext, cargo_args: Vec<String>) -> CliResult<Exit
 
 struct WorkspaceContext {
     root_dir: PathBuf,
-    // This will be None if abrasive is called from the workspace root
-    called_from_subdir: Option<PathBuf>,
+    /// None if abrasive is called from the workspace root
+    subdir: Option<String>,
 }
 
 impl WorkspaceContext {
-    /// The point of this is other functions will want what dir abrasive was called
-    /// from relative to the workspace root (abrasive.toml)
-    fn from_paths(config: &Path, called_from: &Path) -> Self {
-        let parent = config.parent().unwrap();
-        let subdir = relative_subdir(parent, called_from);
-        Self {
-            root_dir: parent.to_path_buf(),
-            called_from_subdir: subdir,
-        }
+    fn from_paths(config: &Path, called_from: &Path) -> CliResult<Self> {
+        let root_dir = config
+            .parent()
+            .expect("abrasive.toml must have a parent directory")
+            .to_path_buf();
+
+        let subdir = relative_subdir(&root_dir, called_from)?;
+        Ok(Self { root_dir, subdir })
     }
 }
 
 /// Helper function to get, for example, "c/d" from ("a/b", "a/b/c/d")
-fn relative_subdir(project_root: &Path, called_from: &Path) -> Option<PathBuf> {
-    called_from.strip_prefix(project_root).ok().and_then(|rel| {
-        if rel.as_os_str().is_empty() {
-            None
-        } else {
-            Some(rel.to_path_buf())
-        }
-    })
+fn relative_subdir(project_root: &Path, called_from: &Path) -> CliResult<Option<String>> {
+    let rel = match called_from.strip_prefix(project_root) {
+        Ok(rel) if !rel.as_os_str().is_empty() => rel,
+        _ => return Ok(None),
+    };
+    let s = rel
+        .to_str()
+        .ok_or_else(|| CliError::invalid_path(rel.display().to_string()))?;
+    Ok(Some(s.to_string()))
 }
 
-fn get_workspace() -> Option<WorkspaceContext> {
-    let cwd = get_cwd();
-    let config = find_abrasive_toml(&cwd);
-    config.map(|p| WorkspaceContext::from_paths(&p, &cwd))
-}
-
-fn get_cwd() -> PathBuf {
-    env::current_dir().unwrap_or_else(|e| {
-        eprintln!("cannot determine current directory: {e}");
-        std::process::exit(1);
-    })
+fn get_workspace() -> CliResult<Option<WorkspaceContext>> {
+    let cwd = env::current_dir().map_err(CliError::no_cwd)?;
+    match find_abrasive_toml(&cwd) {
+        Some(config) => Ok(Some(WorkspaceContext::from_paths(&config, &cwd)?)),
+        None => Ok(None),
+    }
 }
 
 /// Walk up from start looking for abrasive.toml. Returns the full
@@ -194,15 +178,14 @@ fn find_abrasive_toml(start: &Path) -> Option<PathBuf> {
 }
 
 /// Transparent on unix, probably close enough on windows
-fn forward_args_to_local() -> ExitCode {
+fn forward_args_to_local() -> CliResult<ExitCode> {
     let args: Vec<String> = env::args().skip(1).collect();
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
         let err = Cmd::new("cargo").args(&args).exec();
         // only reaches here if exec failed
-        eprintln!("{err}");
-        ExitCode::from(127)
+        Err(CliError::cargo_not_found(err))
     }
 
     #[cfg(not(unix))]
@@ -210,8 +193,8 @@ fn forward_args_to_local() -> ExitCode {
         let status = Cmd::new("cargo")
             .args(&args)
             .status()
-            .expect("cargo not found");
-        ExitCode::from(status.code().unwrap_or(1) as u8)
+            .map_err(CliError::cargo_not_found)?;
+        Ok(ExitCode::from(status.code().unwrap_or(1) as u8))
     }
 }
 
@@ -220,17 +203,17 @@ fn should_go_remote(args: &[String]) -> bool {
         .map_or(false, |cmd| REMOTE_COMMANDS.contains(&cmd.as_str()))
 }
 
-fn main() -> ExitCode {
+fn run() -> CliResult<ExitCode> {
     // First, Check if we are in an abrasive workspace
     // if not forward args to local cargo
-    let ctx = match get_workspace() {
+    let ctx = match get_workspace()? {
         None => return forward_args_to_local(),
         Some(ctx) => ctx,
     };
 
     // Check if the command is in the whitelist: REMOTE_COMMANDS
     // only whitelisted commands will be run remotely, the rest
-    // uses local cargo 
+    // uses local cargo
     let raw_args: Vec<String> = env::args().skip(1).collect();
     if !should_go_remote(&raw_args) {
         return forward_args_to_local();
@@ -243,10 +226,20 @@ fn main() -> ExitCode {
         Some(Command::Auth) => login(),
         Some(Command::Version) => print_version(),
         Some(Command::Help) => print_help(),
-        Some(Command::Workspace) => print_workspace(),
+        Some(Command::Workspace) => print_workspace()?,
         None if cli.cargo_args.is_empty() => print_help(),
-        None => return forward_args_to_remote(&ctx, cli.cargo_args),
+        None => return try_remote(&ctx, cli.cargo_args),
     }
 
-    ExitCode::SUCCESS
+    Ok(ExitCode::SUCCESS)
+}
+
+fn main() -> ExitCode {
+    match run() {
+        Ok(code) => code,
+        Err(e) => {
+            eprintln!("{e}");
+            e.exit_code
+        }
+    }
 }

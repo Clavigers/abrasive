@@ -14,7 +14,6 @@ name = "abrasive-protocol"
 version = "0.0.0"
 dependencies = [
  "bincode",
- "log",
  "serde",
  "thiserror",
 ]
@@ -27,12 +26,6 @@ checksum = "b1f45e9417d87227c7a56d22e471c6206462cba514c7590c09aff4cf6d1ddcad"
 dependencies = [
  "serde",
 ]
-
-[[package]]
-name = "log"
-version = "0.4.29"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e5032e24019045c762d3c0f28f5b6b8bbf38563a65908389bf7978758920897"
 
 [[package]]
 name = "proc-macro2"
