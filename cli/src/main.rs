@@ -1,5 +1,6 @@
 mod errors;
 mod platform;
+mod tls;
 
 use abrasive_protocol::{BuildRequest, Header, Message, decode, encode};
 use clap::builder::styling::{AnsiColor, Styles};
@@ -8,6 +9,7 @@ use errors::{CliError, CliResult};
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::time::Duration;
+use tls::TlsStream;
 use std::{
     env,
     path::{Path, PathBuf},
@@ -89,17 +91,19 @@ fn login() {
 
 fn try_remote(ctx: &WorkspaceContext, cargo_args: Vec<String>) -> CliResult<ExitCode> {
     let addr: SocketAddr = format!("{}:{}", IP, PORT).parse().unwrap();
-    let mut stream =
-        TcpStream::connect_timeout(&addr, Duration::from_secs(5)).map_err(CliError::connect)?;
-    stream.set_read_timeout(Some(Duration::from_secs(300)))?;
-    stream.set_write_timeout(Some(Duration::from_secs(30)))?;
+    let tcp = TcpStream::connect_timeout(&addr, Duration::from_secs(5))
+        .map_err(CliError::connect)?;
+    tcp.set_read_timeout(Some(Duration::from_secs(300)))?;
+    tcp.set_write_timeout(Some(Duration::from_secs(30)))?;
+
+    let mut stream: TlsStream = tls::connect(tcp)?;
 
     // TODO: sync files first
     let host_platform = host_triple();
     let frame = encode(&Message::BuildRequest(BuildRequest {
         cargo_args,
         subdir: ctx.subdir.clone(),
-        host_platform: host_platform // right now target triple
+        host_platform,
     }));
     stream.write_all(&frame)?;
 

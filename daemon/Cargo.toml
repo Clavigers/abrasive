@@ -5,3 +5,5 @@ edition = "2024"
 
 [dependencies]
 abrasive-protocol = { path = "../protocol" }
+rustls = "0.23"
+rustls-pemfile = "2"
