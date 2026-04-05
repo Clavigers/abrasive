@@ -1,4 +1,5 @@
 mod errors;
+mod platform;
 
 use abrasive_protocol::{BuildRequest, Header, Message, decode, encode};
 use clap::builder::styling::{AnsiColor, Styles};
@@ -12,6 +13,8 @@ use std::{
     path::{Path, PathBuf},
     process::{Command as Cmd, ExitCode},
 };
+
+use crate::platform::host_triple;
 
 const IP: &str = "157.180.55.180";
 const PORT: u16 = 8400;
@@ -92,10 +95,11 @@ fn try_remote(ctx: &WorkspaceContext, cargo_args: Vec<String>) -> CliResult<Exit
     stream.set_write_timeout(Some(Duration::from_secs(30)))?;
 
     // TODO: sync files first
-
+    let host_platform = host_triple();
     let frame = encode(&Message::BuildRequest(BuildRequest {
         cargo_args,
         subdir: ctx.subdir.clone(),
+        host_platform: host_platform // right now target triple
     }));
     stream.write_all(&frame)?;
 

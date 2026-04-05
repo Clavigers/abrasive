@@ -48,13 +48,12 @@ pub struct FileEntry {
     pub hash: [u8; 32],
 }
 
-
 /// Architecture
 #[derive(Debug, Serialize, Deserialize)]
 #[repr(u8)]
 pub enum Arch {
-      X86_64 = 0,
-      Aarch64 = 1,
+    X86_64 = 0,
+    Aarch64 = 1,
 }
 
 /// Operating System
@@ -69,7 +68,7 @@ pub enum Os {
 /// Application Binary Interface
 #[derive(Debug, Serialize, Deserialize)]
 #[repr(u8)]
-pub enum Abi { 
+pub enum Abi {
     Gnu = 0,
     Musl = 1,
     Msvc = 2,
@@ -79,14 +78,32 @@ pub enum Abi {
 pub struct PlatformTriple {
     pub arch: Arch,
     pub os: Os,
-    pub abi: Abi
+    pub abi: Abi,
+}
+
+impl PlatformTriple {
+    pub fn as_cargo_target_string(&self) -> String {
+        match (&self.arch, &self.os, &self.abi) {
+            (Arch::X86_64, Os::Linux, Abi::Gnu) => "x86_64-unknown-linux-gnu",
+            (Arch::X86_64, Os::Linux, Abi::Musl) => "x86_64-unknown-linux-musl",
+            (Arch::Aarch64, Os::Linux, Abi::Gnu) => "aarch64-unknown-linux-gnu",
+            (Arch::Aarch64, Os::Linux, Abi::Musl) => "aarch64-unknown-linux-musl",
+            (Arch::X86_64, Os::Windows, Abi::Msvc) => "x86_64-pc-windows-msvc",
+            (Arch::X86_64, Os::Windows, Abi::Gnu) => "x86_64-pc-windows-gnu",
+            (Arch::Aarch64, Os::Windows, Abi::Msvc) => "aarch64-pc-windows-msvc",
+            (Arch::X86_64, Os::Mac, _) => "x86_64-apple-darwin",
+            (Arch::Aarch64, Os::Mac, _) => "aarch64-apple-darwin",
+            _ => unimplemented!(),
+        }
+        .to_string()
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BuildRequest {
     pub cargo_args: Vec<String>,
     pub subdir: Option<String>,
-    pub target_triple: PlatformTriple
+    pub host_platform: PlatformTriple, 
     // environment_variables: Vec<String>, TODO
 }
 

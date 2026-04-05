@@ -1,8 +1,11 @@
-use abrasive_protocol::{decode, encode, BuildRequest, Header, Message};
+use abrasive_protocol::{decode, encode, BuildRequest, Header, Message, PlatformTriple};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::process::{Command, Stdio};
 use std::thread;
+
+/// Commands that accept --target
+const TARGET_COMMANDS: &[&str] = &["build", "check", "test", "bench", "clippy", "doc"];
 
 fn recv_msg(stream: &mut TcpStream) -> std::io::Result<Message> {
     let mut header_buf = [0u8; Header::SIZE];
@@ -37,7 +40,7 @@ fn handle(mut stream: TcpStream) {
         }
     };
 
-    let BuildRequest { cargo_args, subdir: _ } = match msg {
+    let BuildRequest { cargo_args, subdir: _, host_platform } = match msg {
         Message::BuildRequest(req) => req,
         other => {
             println!("[{peer}] unexpected message: {other:?}");
@@ -47,6 +50,8 @@ fn handle(mut stream: TcpStream) {
 
     // Convert `run` to `build` — the client runs the binary locally
     let (cargo_args, _run_it) = rewrite_run_as_build(cargo_args);
+
+    let cargo_args = amend_args_with_platform(cargo_args, host_platform);
 
     println!("[{peer}] cargo {}", cargo_args.join(" "));
 
@@ -122,6 +127,19 @@ fn rewrite_run_as_build(args: Vec<String>) -> (Vec<String>, bool) {
       }
       (out, true)
   }
+
+
+fn amend_args_with_platform(mut args: Vec<String>, platform: PlatformTriple) -> Vec<String> {
+    let accepts_target = args.first().map_or(false, |cmd| TARGET_COMMANDS.contains(&cmd.as_str()));
+    let already_has_target = args.iter().any(|a| a == "--target" || a.starts_with("--target="));
+
+    if accepts_target && !already_has_target {
+        args.push("--target".to_string());
+        args.push(platform.as_cargo_target_string());
+    }
+
+    args
+}
 
 fn main() {
     let listener = TcpListener::bind("0.0.0.0:8400").unwrap();
