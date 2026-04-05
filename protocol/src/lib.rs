@@ -48,10 +48,45 @@ pub struct FileEntry {
     pub hash: [u8; 32],
 }
 
+
+/// Architecture
+#[derive(Debug, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum Arch {
+      X86_64 = 0,
+      Aarch64 = 1,
+}
+
+/// Operating System
+#[derive(Debug, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum Os {
+    Windows = 0,
+    Linux = 1,
+    Mac = 2,
+}
+
+/// Application Binary Interface
+#[derive(Debug, Serialize, Deserialize)]
+#[repr(u8)]
+pub enum Abi { 
+    Gnu = 0,
+    Musl = 1,
+    Msvc = 2,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PlatformTriple {
+    pub arch: Arch,
+    pub os: Os,
+    pub abi: Abi
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BuildRequest {
     pub cargo_args: Vec<String>,
     pub subdir: Option<String>,
+    pub target_triple: Abi
     // environment_variables: Vec<String>, TODO
 }
 
