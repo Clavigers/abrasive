@@ -86,7 +86,7 @@ pub struct PlatformTriple {
 pub struct BuildRequest {
     pub cargo_args: Vec<String>,
     pub subdir: Option<String>,
-    pub target_triple: Abi
+    pub target_triple: PlatformTriple
     // environment_variables: Vec<String>, TODO
 }
 
