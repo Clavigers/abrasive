@@ -177,6 +177,7 @@ fn handle(tcp_stream: TcpStream, tls_config: Arc<rustls::ServerConfig>) {
         println!("[{peer}] failed to create workspace {}: {e}", workspace.display());
         return;
     }
+    ensure_target_on_tmpfs(&workspace, &team, &scope, &peer);
 
     if let Err(e) = handle_sync(&mut stream, &workspace, &peer, &files) {
         println!("[{peer}] sync failed: {e}");
@@ -199,6 +200,46 @@ fn handle(tcp_stream: TcpStream, tls_config: Arc<rustls::ServerConfig>) {
     // than assuming it matches the one we just synced.
     let build_workspace = workspace_path(&req.team, &req.scope);
     run_build(&mut stream, &peer, &build_workspace, req);
+}
+
+/// Make `<workspace>/target` live on tmpfs (/dev/shm) so cargo's
+/// write-heavy build artifacts skip the disk entirely. We do this with
+/// a symlink rather than a mount so we don't need root or namespacing.
+///
+/// Behavior:
+/// - If `target` doesn't exist: create the tmpfs dir and symlink it in.
+/// - If `target` is already the right symlink: nothing to do.
+/// - If `target` is a real directory or some other symlink: leave it
+///   alone and warn (we don't want to nuke prior build state by surprise).
+fn ensure_target_on_tmpfs(workspace: &Path, team: &str, scope: &str, peer: &str) {
+    let tmpfs_target = PathBuf::from(format!("/dev/shm/abrasive-targets/{}_{}", team, scope));
+    let target_link = workspace.join("target");
+
+    if let Err(e) = fs::create_dir_all(&tmpfs_target) {
+        println!("[{peer}] tmpfs target unavailable ({e}); falling back to disk");
+        return;
+    }
+
+    match fs::symlink_metadata(&target_link) {
+        Ok(meta) if meta.file_type().is_symlink() => {
+            if fs::read_link(&target_link).ok().as_deref() == Some(tmpfs_target.as_path()) {
+                return; // already wired up
+            }
+            println!("[{peer}] target/ is a symlink to something else; leaving alone");
+        }
+        Ok(_) => {
+            println!("[{peer}] target/ is a real directory; leaving alone (delete it manually to enable tmpfs)");
+        }
+        Err(_) => {
+            // Doesn't exist — create the symlink.
+            #[cfg(unix)]
+            if let Err(e) = std::os::unix::fs::symlink(&tmpfs_target, &target_link) {
+                println!("[{peer}] failed to symlink target -> {}: {e}", tmpfs_target.display());
+            } else {
+                println!("[{peer}] target/ -> {}", tmpfs_target.display());
+            }
+        }
+    }
 }
 
 fn workspace_path(team: &str, scope: &str) -> PathBuf {
