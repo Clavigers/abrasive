@@ -59,7 +59,7 @@ get the sync stuff to be faster (maybe by creating something more like a merkle 
 [CACHE] Add a denylist of crates known to be non-deterministic (anything embedding git rev, build time, hostname) — wrapper skips caching them
 [CACHE] Cache build script outputs separately, keyed on (build script source hash, declared env vars, target triple)
 [CACHE] Capacity-based LRU eviction for the content cache when it grows beyond a configured size
-
+[CACHE] Optional sccache backend: opt-in flag in abrasive.toml that makes the daemon set `RUSTC_WRAPPER=sccache` + `SCCACHE_DIR=/dev/shm/sccache` + `CARGO_INCREMENTAL=0` instead of using the abrasive wrapper
 [PERF] (done) `mold -run cargo` in the daemon spawn
 [PERF] (done) tmpfs symlink for `<workspace>/target` → `/dev/shm/abrasive-targets/{team}_{scope}/`
 [PERF] (done) `CARGO_PROFILE_DEV_DEBUG=line-tables-only` env var
