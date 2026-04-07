@@ -15,15 +15,10 @@
 [MARKETING] De-Sussify the Github page for abrasive-cli
 
 ## ASAP
-[INFRA] Set up hetzner remote thingy https://www.hetzner.com/dedicated-rootserver/ax102/
-[CLI] Make the CLI actually forward cargo invocations to a remote
-[CLI] Make that positionally aware somehow
 
-run the local cargo and the remote, make them race first to be done wins
+[IDEA] run the local cargo and the remote, make them race first to be done wins
 
-make the init / setup command ask you questions in the foreground while the repo is being synced in the background
-
-maybe convert the tls connection into ws 
+[IDEA] make the init / setup command ask you questions in the foreground while the repo is being synced in the background
 
 get the sync stuff to be faster (maybe by creating something more like a merkle tree / or just a 32 bit everything hash that can be calculated quickly and potentially stored somewhere)
 
@@ -60,6 +55,7 @@ get the sync stuff to be faster (maybe by creating something more like a merkle 
 [CACHE] Cache build script outputs separately, keyed on (build script source hash, declared env vars, target triple)
 [CACHE] Capacity-based LRU eviction for the content cache when it grows beyond a configured size
 [CACHE] Optional sccache backend: opt-in flag in abrasive.toml that makes the daemon set `RUSTC_WRAPPER=sccache` + `SCCACHE_DIR=/dev/shm/sccache` + `CARGO_INCREMENTAL=0` instead of using the abrasive wrapper
+
 [PERF] (done) `mold -run cargo` in the daemon spawn
 [PERF] (done) tmpfs symlink for `<workspace>/target` → `/dev/shm/abrasive-targets/{team}_{scope}/`
 [PERF] (done) `CARGO_PROFILE_DEV_DEBUG=line-tables-only` env var
