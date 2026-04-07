@@ -210,9 +210,11 @@ fn run_build(stream: &mut TlsStream, peer: &str, workspace: &Path, req: BuildReq
         None => workspace.to_path_buf(),
     };
 
-    println!("[{peer}] cargo {} (in {})", cargo_args.join(" "), cd_target.display());
+    println!("[{peer}] mold -run cargo {} (in {})", cargo_args.join(" "), cd_target.display());
 
-    let mut child = match Command::new("cargo")
+    let mut child = match Command::new("mold")
+        .arg("-run")
+        .arg("cargo")
         .args(&cargo_args)
         .current_dir(&cd_target)
         .stdout(Stdio::piped())
