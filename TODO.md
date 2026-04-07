@@ -49,5 +49,12 @@
 [POLISH] Fix interleaved `[REMOTE]` prefix output: buffer until newline before prefixing each line, so chunks that arrive split mid-line don't render as `[REMOTE]    Compiling[REMOTE]  bytemuck v1.25.0`
 [POLISH] Surface remote environment errors (missing `pkg-config`, missing system libs from build scripts) more clearly in the CLI rather than hiding them in the cargo wall-of-text
 [POLISH] Make `--version` / `--help` work outside an abrasive workspace (currently they get filtered by `should_go_remote` and forwarded to cargo even though they're abrasive subcommands)
+[POLISH] Make "setup" command that syncs and interactively writes an abrasive.toml file
 
 ## ASAP
+
+websockets rewrite
+
+github auth
+
+make multiple clones per scope (slots) M=4 add queue and fingerprint
