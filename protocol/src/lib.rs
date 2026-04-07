@@ -32,7 +32,7 @@ impl Header {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Message {
-    Manifest(Vec<FileEntry>),
+    Manifest(Manifest),
     NeedFiles(Vec<String>),
     FileData { path: String, contents: Vec<u8> },
     SyncDone,
@@ -41,6 +41,13 @@ pub enum Message {
     BuildStdout(Vec<u8>),
     BuildStderr(Vec<u8>),
     BuildFinished { exit_code: u8 },
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Manifest {
+    pub team: String,
+    pub scope: String,
+    pub files: Vec<FileEntry>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -104,8 +111,9 @@ impl PlatformTriple {
 pub struct BuildRequest {
     pub cargo_args: Vec<String>,
     pub subdir: Option<String>,
-    pub host_platform: PlatformTriple, 
-    // environment_variables: Vec<String>, TODO
+    pub host_platform: PlatformTriple,
+    pub team: String,
+    pub scope: String,
 }
 
 pub fn encode(msg: &Message) -> Vec<u8> {

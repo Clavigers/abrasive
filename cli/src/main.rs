@@ -2,16 +2,17 @@ mod errors;
 mod platform;
 mod tls;
 
-use abrasive_protocol::{BuildRequest, Header, Message, decode, encode};
+use abrasive_protocol::{BuildRequest, FileEntry, Header, Manifest, Message, decode, encode};
 use clap::builder::styling::{AnsiColor, Styles};
 use clap::{CommandFactory, Parser, Subcommand};
 use errors::{CliError, CliResult};
+use serde::Deserialize;
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::time::Duration;
 use tls::TlsStream;
 use std::{
-    env,
+    env, fs,
     path::{Path, PathBuf},
     process::{Command as Cmd, ExitCode},
 };
@@ -60,7 +61,6 @@ enum Command {
 fn print_help() {
     println!("ABRASIVE {}\n", env!("CARGO_PKG_VERSION"));
     let _ = Cli::command().color(clap::ColorChoice::Always).print_help();
-    println!("\n");
     let _ = Cmd::new("cargo").arg("--help").status();
 }
 
@@ -89,7 +89,92 @@ fn login() {
     todo!("login")
 }
 
+fn build_manifest(root: &Path) -> Vec<FileEntry> {
+    use ignore::WalkBuilder;
+
+    WalkBuilder::new(root)
+        .git_ignore(true)
+        .git_exclude(true)
+        .filter_entry(|e| e.file_name() != ".git")
+        .build()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().map_or(false, |ft| ft.is_file()))
+        .filter_map(|e| {
+            let rel = e.path().strip_prefix(root).ok()?.to_string_lossy().to_string();
+            let data = fs::read(e.path()).ok()?;
+            let hash = *blake3::hash(&data).as_bytes();
+            Some(FileEntry { path: rel, hash })
+        })
+        .collect()
+}
+
+fn send_frame(stream: &mut TlsStream, msg: &Message) -> CliResult<()> {
+    let frame = encode(msg);
+    stream.write_all(&frame)?;
+    Ok(())
+}
+
+fn recv_frame(stream: &mut TlsStream) -> CliResult<Message> {
+    let mut header_buf = [0u8; Header::SIZE];
+    stream
+        .read_exact(&mut header_buf)
+        .map_err(|_| CliError::disconnected())?;
+    let header = Header::from_bytes(&header_buf);
+    let mut raw = vec![0u8; Header::SIZE + header.length as usize];
+    raw[..Header::SIZE].copy_from_slice(&header_buf);
+    stream.read_exact(&mut raw[Header::SIZE..])?;
+    Ok(decode(&raw)?.message)
+}
+
+fn sync_files(stream: &mut TlsStream, root: &Path, team: &str, scope: &str) -> CliResult<()> {
+    eprintln!("[sync] scanning files...");
+    let files = build_manifest(root);
+    eprintln!("[sync] {} files in manifest", files.len());
+
+    send_frame(stream, &Message::Manifest(Manifest {
+        team: team.to_string(),
+        scope: scope.to_string(),
+        files,
+    }))?;
+
+    // Server tells us what it needs
+    let needed = match recv_frame(stream)? {
+        Message::NeedFiles(paths) => paths,
+        other => {
+            eprintln!("[sync] unexpected message: {other:?}");
+            return Err(CliError::disconnected());
+        }
+    };
+
+    eprintln!("[sync] sending {} files", needed.len());
+
+    for path in &needed {
+        let full = root.join(path);
+        let contents = fs::read(&full)?;
+        send_frame(stream, &Message::FileData {
+            path: path.clone(),
+            contents,
+        })?;
+    }
+    send_frame(stream, &Message::SyncDone)?;
+
+    // Wait for ack
+    match recv_frame(stream)? {
+        Message::SyncAck => {}
+        _ => return Err(CliError::disconnected()),
+    }
+
+    eprintln!("[sync] done");
+    Ok(())
+}
+
 fn try_remote(ctx: &WorkspaceContext, cargo_args: Vec<String>) -> CliResult<ExitCode> {
+    // Only whitelisted cargo commands run remotely; everything else
+    // (e.g. `clean`, `update`, `add`) falls through to local cargo.
+    if !should_go_remote(&cargo_args) {
+        return forward_args_to_local();
+    }
+
     let addr: SocketAddr = format!("{}:{}", IP, PORT).parse().unwrap();
     let tcp = TcpStream::connect_timeout(&addr, Duration::from_secs(5))
         .map_err(CliError::connect)?;
@@ -98,31 +183,29 @@ fn try_remote(ctx: &WorkspaceContext, cargo_args: Vec<String>) -> CliResult<Exit
 
     let mut stream: TlsStream = tls::connect(tcp)?;
 
-    // TODO: sync files first
+    // Sync files first
+    sync_files(&mut stream, &ctx.root_dir, &ctx.config.team, &ctx.config.scope)?;
+
+    // Send build request
     let host_platform = host_triple();
-    let frame = encode(&Message::BuildRequest(BuildRequest {
+    send_frame(&mut stream, &Message::BuildRequest(BuildRequest {
         cargo_args,
         subdir: ctx.subdir.clone(),
         host_platform,
-    }));
-    stream.write_all(&frame)?;
+        team: ctx.config.team.clone(),
+        scope: ctx.config.scope.clone(),
+    }))?;
 
+    // Stream build output
     loop {
-        let mut header_buf = [0u8; Header::SIZE];
-        stream
-            .read_exact(&mut header_buf)
-            .map_err(|_| CliError::disconnected())?;
-        let header = Header::from_bytes(&header_buf);
-        let mut raw = vec![0u8; Header::SIZE + header.length as usize];
-        raw[..Header::SIZE].copy_from_slice(&header_buf);
-        stream.read_exact(&mut raw[Header::SIZE..])?;
-        let frame = decode(&raw)?;
-
-        match frame.message {
+        let msg = recv_frame(&mut stream)?;
+        match msg {
             Message::BuildStdout(data) => {
+                io::stderr().write_all(b"[REMOTE] ")?;
                 io::stdout().write_all(&data)?;
             }
             Message::BuildStderr(data) => {
+                io::stderr().write_all(b"[REMOTE] ")?;
                 io::stderr().write_all(&data)?;
             }
             Message::BuildFinished { exit_code } => {
@@ -133,21 +216,45 @@ fn try_remote(ctx: &WorkspaceContext, cargo_args: Vec<String>) -> CliResult<Exit
     }
 }
 
+#[derive(Deserialize)]
+struct AbrasiveConfig {
+    remote: RemoteConfig,
+}
+
+#[derive(Deserialize)]
+struct RemoteConfig {
+    #[allow(dead_code)]
+    host: String,
+    team: String,
+    scope: String,
+}
+
 struct WorkspaceContext {
     root_dir: PathBuf,
     /// None if abrasive is called from the workspace root
     subdir: Option<String>,
+    config: RemoteConfig,
 }
 
 impl WorkspaceContext {
-    fn from_paths(config: &Path, called_from: &Path) -> CliResult<Self> {
-        let root_dir = config
+    fn from_paths(config_path: &Path, called_from: &Path) -> CliResult<Self> {
+        let root_dir = config_path
             .parent()
             .expect("abrasive.toml must have a parent directory")
             .to_path_buf();
 
         let subdir = relative_subdir(&root_dir, called_from)?;
-        Ok(Self { root_dir, subdir })
+
+        let config_str = fs::read_to_string(config_path)
+            .map_err(|e| CliError::invalid_path(format!("cannot read abrasive.toml: {e}")))?;
+        let parsed: AbrasiveConfig = toml::from_str(&config_str)
+            .map_err(|e| CliError::invalid_path(format!("invalid abrasive.toml: {e}")))?;
+
+        Ok(Self {
+            root_dir,
+            subdir,
+            config: parsed.remote,
+        })
     }
 }
 
@@ -221,14 +328,6 @@ fn run() -> CliResult<ExitCode> {
         None => return forward_args_to_local(),
         Some(ctx) => ctx,
     };
-
-    // Check if the command is in the whitelist: REMOTE_COMMANDS
-    // only whitelisted commands will be run remotely, the rest
-    // uses local cargo
-    let raw_args: Vec<String> = env::args().skip(1).collect();
-    if !should_go_remote(&raw_args) {
-        return forward_args_to_local();
-    }
 
     // Things Abrasive handles
     let cli = Cli::parse();

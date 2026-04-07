@@ -1,9 +1,12 @@
-use abrasive_protocol::{decode, encode, BuildRequest, Header, Message, PlatformTriple};
+use abrasive_protocol::{decode, encode, BuildRequest, Header, Manifest, Message, PlatformTriple};
+use std::env;
 use rustls::ServerConnection;
 use rustls::StreamOwned;
+use std::collections::HashMap;
 use std::fs;
 use std::io::{BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::thread;
@@ -50,6 +53,83 @@ fn send_msg(stream: &mut TlsStream, msg: &Message) -> std::io::Result<()> {
     stream.flush()
 }
 
+fn hash_file(path: &Path) -> Option<[u8; 32]> {
+    let data = fs::read(path).ok()?;
+    Some(*blake3::hash(&data).as_bytes())
+}
+
+fn local_manifest(workspace: &Path) -> HashMap<String, [u8; 32]> {
+    let mut map = HashMap::new();
+    if !workspace.exists() {
+        return map;
+    }
+    for entry in walkdir::WalkDir::new(workspace)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+    {
+        // Skip the target directory
+        if entry.path().components().any(|c| c.as_os_str() == "target") {
+            continue;
+        }
+        if let Ok(rel) = entry.path().strip_prefix(workspace) {
+            if let Some(hash) = hash_file(entry.path()) {
+                map.insert(rel.to_string_lossy().to_string(), hash);
+            }
+        }
+    }
+    map
+}
+
+fn handle_sync(
+    stream: &mut TlsStream,
+    workspace: &Path,
+    peer: &str,
+    client_files: &[abrasive_protocol::FileEntry],
+) -> std::io::Result<()> {
+    // Diff against local state
+    let local = local_manifest(workspace);
+    let needed: Vec<String> = client_files
+        .iter()
+        .filter(|f| local.get(&f.path) != Some(&f.hash))
+        .map(|f| f.path.clone())
+        .collect();
+
+    // Delete stale files
+    let client_paths: std::collections::HashSet<&str> =
+        client_files.iter().map(|f| f.path.as_str()).collect();
+    for local_path in local.keys() {
+        if !client_paths.contains(local_path.as_str()) {
+            let _ = fs::remove_file(workspace.join(local_path));
+        }
+    }
+
+    println!("[{peer}] sync: need {}/{} files", needed.len(), client_files.len());
+    send_msg(stream, &Message::NeedFiles(needed))?;
+
+    // 3. Receive files
+    loop {
+        match recv_msg(stream)? {
+            Message::FileData { path, contents } => {
+                let dest = workspace.join(&path);
+                if let Some(parent) = dest.parent() {
+                    fs::create_dir_all(parent).ok();
+                }
+                fs::write(&dest, &contents)?;
+            }
+            Message::SyncDone => break,
+            other => {
+                println!("[{peer}] unexpected during sync: {other:?}");
+                return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "unexpected message"));
+            }
+        }
+    }
+
+    println!("[{peer}] sync complete");
+    send_msg(stream, &Message::SyncAck)?;
+    Ok(())
+}
+
 fn handle(tcp_stream: TcpStream, tls_config: Arc<rustls::ServerConfig>) {
     let peer = tcp_stream
         .peer_addr()
@@ -66,36 +146,75 @@ fn handle(tcp_stream: TcpStream, tls_config: Arc<rustls::ServerConfig>) {
     };
     let mut stream = StreamOwned::new(tls_conn, tcp_stream);
 
-    let msg = match recv_msg(&mut stream) {
-        Ok(m) => m,
+    let manifest = match recv_msg(&mut stream) {
+        Ok(Message::Manifest(m)) => m,
+        Ok(other) => {
+            println!("[{peer}] expected Manifest, got: {other:?}");
+            return;
+        }
         Err(e) => {
             println!("[{peer}] read error: {e}");
             return;
         }
     };
 
-    let BuildRequest {
-        cargo_args,
-        subdir: _,
-        host_platform,
-    } = match msg {
-        Message::BuildRequest(req) => req,
-        other => {
-            println!("[{peer}] unexpected message: {other:?}");
+    let Manifest { team, scope, files } = manifest;
+    let workspace = workspace_path(&team, &scope);
+    if let Err(e) = fs::create_dir_all(&workspace) {
+        println!("[{peer}] failed to create workspace {}: {e}", workspace.display());
+        return;
+    }
+
+    if let Err(e) = handle_sync(&mut stream, &workspace, &peer, &files) {
+        println!("[{peer}] sync failed: {e}");
+        return;
+    }
+
+    let req = match recv_msg(&mut stream) {
+        Ok(Message::BuildRequest(req)) => req,
+        Ok(other) => {
+            println!("[{peer}] expected BuildRequest, got: {other:?}");
+            return;
+        }
+        Err(e) => {
+            println!("[{peer}] read error: {e}");
             return;
         }
     };
 
-    // Convert `run` to `build` — the client runs the binary locally
-    let (cargo_args, _run_it) = rewrite_run_as_build(cargo_args);
+    // BuildRequest is self-addressing — resolve its own workspace rather
+    // than assuming it matches the one we just synced.
+    let build_workspace = workspace_path(&req.team, &req.scope);
+    run_build(&mut stream, &peer, &build_workspace, req);
+}
 
+fn workspace_path(team: &str, scope: &str) -> PathBuf {
+    let home = env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+    PathBuf::from(format!("{}/{}_{}", home, team, scope))
+}
+
+fn run_build(stream: &mut TlsStream, peer: &str, workspace: &Path, req: BuildRequest) {
+    let BuildRequest {
+        cargo_args,
+        subdir,
+        host_platform,
+        team: _,
+        scope: _,
+    } = req;
+
+    let (cargo_args, _run_it) = rewrite_run_as_build(cargo_args);
     let cargo_args = amend_args_with_platform(cargo_args, host_platform);
 
-    println!("[{peer}] cargo {}", cargo_args.join(" "));
+    let cd_target = match &subdir {
+        Some(rel) => workspace.join(rel),
+        None => workspace.to_path_buf(),
+    };
 
-    // TODO: use subdir for cd target
+    println!("[{peer}] cargo {} (in {})", cargo_args.join(" "), cd_target.display());
+
     let mut child = match Command::new("cargo")
         .args(&cargo_args)
+        .current_dir(&cd_target)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -103,10 +222,10 @@ fn handle(tcp_stream: TcpStream, tls_config: Arc<rustls::ServerConfig>) {
         Ok(c) => c,
         Err(e) => {
             let _ = send_msg(
-                &mut stream,
+                stream,
                 &Message::BuildStderr(format!("failed to spawn cargo: {e}\n").into_bytes()),
             );
-            let _ = send_msg(&mut stream, &Message::BuildFinished { exit_code: 1 });
+            let _ = send_msg(stream, &Message::BuildFinished { exit_code: 1 });
             return;
         }
     };
@@ -123,7 +242,9 @@ fn handle(tcp_stream: TcpStream, tls_config: Arc<rustls::ServerConfig>) {
         loop {
             match reader.read(&mut buf) {
                 Ok(0) | Err(_) => break,
-                Ok(n) => { let _ = tx_out.send(Message::BuildStdout(buf[..n].to_vec())); }
+                Ok(n) => {
+                    let _ = tx_out.send(Message::BuildStdout(buf[..n].to_vec()));
+                }
             }
         }
     });
@@ -135,33 +256,31 @@ fn handle(tcp_stream: TcpStream, tls_config: Arc<rustls::ServerConfig>) {
         loop {
             match reader.read(&mut buf) {
                 Ok(0) | Err(_) => break,
-                Ok(n) => { let _ = tx_err.send(Message::BuildStderr(buf[..n].to_vec())); }
+                Ok(n) => {
+                    let _ = tx_err.send(Message::BuildStderr(buf[..n].to_vec()));
+                }
             }
         }
     });
 
     for msg in rx {
-        let _ = send_msg(&mut stream, &msg);
+        let _ = send_msg(stream, &msg);
     }
 
     let status = child.wait().unwrap();
     if let Err(e) = send_msg(
-        &mut stream,
+        stream,
         &Message::BuildFinished {
             exit_code: status.code().unwrap_or(1) as u8,
         },
     ) {
         println!("[{peer}] failed to send BuildFinished: {e}");
     }
-    // Shut down TLS cleanly before dropping
     let _ = stream.conn.send_close_notify();
     let _ = stream.flush();
     println!("[{peer}] done");
 }
 
-/// Rewrites `run` to `build`, stripping args that come after `--`
-/// since those are runtime args, not build args. also returns a
-/// flag indicating if run was found.
 fn rewrite_run_as_build(args: Vec<String>) -> (Vec<String>, bool) {
     if args.first().map_or(true, |cmd| cmd != "run") {
         return (args, false);
@@ -178,9 +297,9 @@ fn rewrite_run_as_build(args: Vec<String>) -> (Vec<String>, bool) {
 }
 
 fn amend_args_with_platform(mut args: Vec<String>, platform: PlatformTriple) -> Vec<String> {
-    let accepts_target =
-        args.first()
-            .map_or(false, |cmd| TARGET_COMMANDS.contains(&cmd.as_str()));
+    let accepts_target = args
+        .first()
+        .map_or(false, |cmd| TARGET_COMMANDS.contains(&cmd.as_str()));
     let already_has_target = args
         .iter()
         .any(|a| a == "--target" || a.starts_with("--target="));
