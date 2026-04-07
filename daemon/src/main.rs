@@ -271,6 +271,16 @@ fn run_build(stream: &mut TlsStream, peer: &str, workspace: &Path, req: BuildReq
         .arg("cargo")
         .args(&cargo_args)
         .current_dir(&cd_target)
+        // Use sccache as the rustc wrapper. Cache lives on tmpfs so it
+        // doesn't survive reboots, but it's pure cache — sccache will
+        // just repopulate. SCCACHE_DIR / size are read by sccache itself.
+        .env("RUSTC_WRAPPER", "sccache")
+        .env("SCCACHE_DIR", "/dev/shm/sccache")
+        .env("SCCACHE_CACHE_SIZE", "20G")
+        // sccache requires CARGO_INCREMENTAL=0 to actually cache anything;
+        // incremental compilation and the sccache cache are mutually
+        // exclusive. For a build server, sccache is the better tradeoff.
+        .env("CARGO_INCREMENTAL", "0")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
