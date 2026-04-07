@@ -1,0 +1,16 @@
+[package]
+name = "abrasive-cli"
+version = "0.0.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4", features = ["derive", "color", "help"] }
+thiserror = "2.0.18"
+abrasive-protocol = { path = "../protocol" }
+rustls = "0.23"
+rustls-pemfile = "2"
+blake3 = "1"
+ignore = "0.4"
+toml = "0.8"
+serde = { version = "1", features = ["derive"] }
+rayon = "1"

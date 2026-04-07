@@ -1,0 +1,12 @@
+[package]
+name = "abrasive-daemon"
+version = "0.0.0"
+edition = "2024"
+
+[dependencies]
+abrasive-protocol = { path = "../protocol" }
+rustls = "0.23"
+rustls-pemfile = "2"
+blake3 = "1"
+walkdir = "2"
+rayon = "1"
