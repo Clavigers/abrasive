@@ -323,7 +323,7 @@ fn amend_args_with_platform(mut args: Vec<String>, platform: PlatformTriple) -> 
 fn main() {
     let tls_config = load_tls_config();
     let listener = TcpListener::bind("0.0.0.0:8400").unwrap();
-    println!("abrasived listening on :8400 (TLS)");
+    println!("abrasived TEST listening on :8400 (TLS)");
     for stream in listener.incoming().flatten() {
         let config = tls_config.clone();
         thread::spawn(move || handle(stream, config));
