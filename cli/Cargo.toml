@@ -13,3 +13,4 @@ blake3 = "1"
 ignore = "0.4"
 toml = "0.8"
 serde = { version = "1", features = ["derive"] }
+rayon = "1"

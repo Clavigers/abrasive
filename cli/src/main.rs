@@ -91,17 +91,25 @@ fn login() {
 
 fn build_manifest(root: &Path) -> Vec<FileEntry> {
     use ignore::WalkBuilder;
+    use rayon::prelude::*;
 
-    WalkBuilder::new(root)
+    // 1. Walk (single-threaded; ignore's parallel walker is awkward to collect from)
+    let paths: Vec<PathBuf> = WalkBuilder::new(root)
         .git_ignore(true)
         .git_exclude(true)
         .filter_entry(|e| e.file_name() != ".git")
         .build()
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().map_or(false, |ft| ft.is_file()))
-        .filter_map(|e| {
-            let rel = e.path().strip_prefix(root).ok()?.to_string_lossy().to_string();
-            let data = fs::read(e.path()).ok()?;
+        .map(|e| e.into_path())
+        .collect();
+
+    // 2. Hash in parallel
+    paths
+        .par_iter()
+        .filter_map(|p| {
+            let rel = p.strip_prefix(root).ok()?.to_string_lossy().to_string();
+            let data = fs::read(p).ok()?;
             let hash = *blake3::hash(&data).as_bytes();
             Some(FileEntry { path: rel, hash })
         })
@@ -148,14 +156,28 @@ fn sync_files(stream: &mut TlsStream, root: &Path, team: &str, scope: &str) -> C
 
     eprintln!("[sync] sending {} files", needed.len());
 
-    for path in &needed {
-        let full = root.join(path);
-        let contents = fs::read(&full)?;
-        send_frame(stream, &Message::FileData {
-            path: path.clone(),
-            contents,
-        })?;
+    // Pipeline: rayon workers read files from disk in parallel and push them
+    // into a bounded channel; this thread drains the channel and writes to
+    // the (single-writer) TLS stream. Order doesn't matter to the server.
+    use rayon::prelude::*;
+    use std::sync::mpsc::sync_channel;
+
+    let (tx, rx) = sync_channel::<(String, Vec<u8>)>(32);
+    let root_buf = root.to_path_buf();
+    let needed_owned = needed.clone();
+    let producer = std::thread::spawn(move || {
+        needed_owned.par_iter().for_each_with(tx, |tx, path| {
+            if let Ok(contents) = fs::read(root_buf.join(path)) {
+                let _ = tx.send((path.clone(), contents));
+            }
+        });
+    });
+
+    for (path, contents) in rx {
+        send_frame(stream, &Message::FileData { path, contents })?;
     }
+    let _ = producer.join();
+
     send_frame(stream, &Message::SyncDone)?;
 
     // Wait for ack

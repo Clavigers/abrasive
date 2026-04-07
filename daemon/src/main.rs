@@ -59,26 +59,30 @@ fn hash_file(path: &Path) -> Option<[u8; 32]> {
 }
 
 fn local_manifest(workspace: &Path) -> HashMap<String, [u8; 32]> {
-    let mut map = HashMap::new();
+    use rayon::prelude::*;
+
     if !workspace.exists() {
-        return map;
+        return HashMap::new();
     }
-    for entry in walkdir::WalkDir::new(workspace)
+
+    // 1. Walk (single-threaded)
+    let paths: Vec<PathBuf> = walkdir::WalkDir::new(workspace)
         .into_iter()
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_file())
-    {
-        // Skip the target directory
-        if entry.path().components().any(|c| c.as_os_str() == "target") {
-            continue;
-        }
-        if let Ok(rel) = entry.path().strip_prefix(workspace) {
-            if let Some(hash) = hash_file(entry.path()) {
-                map.insert(rel.to_string_lossy().to_string(), hash);
-            }
-        }
-    }
-    map
+        .filter(|e| !e.path().components().any(|c| c.as_os_str() == "target"))
+        .map(|e| e.into_path())
+        .collect();
+
+    // 2. Hash in parallel
+    paths
+        .par_iter()
+        .filter_map(|p| {
+            let rel = p.strip_prefix(workspace).ok()?.to_string_lossy().to_string();
+            let hash = hash_file(p)?;
+            Some((rel, hash))
+        })
+        .collect()
 }
 
 fn handle_sync(
