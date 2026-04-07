@@ -47,7 +47,28 @@ pub enum Message {
 pub struct Manifest {
     pub team: String,
     pub scope: String,
-    pub files: Vec<FileEntry>,
+    /// gzip(bincode(Vec<FileEntry>))
+    pub files_gz: Vec<u8>,
+}
+
+impl Manifest {
+    pub fn encode_files(files: &[FileEntry]) -> Vec<u8> {
+        use flate2::{Compression, write::GzEncoder};
+        use std::io::Write;
+        let raw = bincode::serialize(files).unwrap();
+        let mut enc = GzEncoder::new(Vec::new(), Compression::default());
+        enc.write_all(&raw).unwrap();
+        enc.finish().unwrap()
+    }
+
+    pub fn decode_files(&self) -> Result<Vec<FileEntry>, DecodeError> {
+        use flate2::read::GzDecoder;
+        use std::io::Read;
+        let mut dec = GzDecoder::new(&self.files_gz[..]);
+        let mut raw = Vec::new();
+        dec.read_to_end(&mut raw).map_err(|e| DecodeError(Box::new(bincode::ErrorKind::Custom(e.to_string()))))?;
+        bincode::deserialize(&raw).map_err(DecodeError)
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]

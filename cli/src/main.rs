@@ -139,10 +139,12 @@ fn sync_files(stream: &mut TlsStream, root: &Path, team: &str, scope: &str) -> C
     let files = build_manifest(root);
     eprintln!("[sync] {} files in manifest", files.len());
 
+    let files_gz = Manifest::encode_files(&files);
+    eprintln!("[sync] manifest: {} entries, {} bytes gzipped", files.len(), files_gz.len());
     send_frame(stream, &Message::Manifest(Manifest {
         team: team.to_string(),
         scope: scope.to_string(),
-        files,
+        files_gz,
     }))?;
 
     // Server tells us what it needs

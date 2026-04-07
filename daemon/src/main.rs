@@ -164,7 +164,14 @@ fn handle(tcp_stream: TcpStream, tls_config: Arc<rustls::ServerConfig>) {
         }
     };
 
-    let Manifest { team, scope, files } = manifest;
+    let files = match manifest.decode_files() {
+        Ok(f) => f,
+        Err(e) => {
+            println!("[{peer}] failed to decode manifest: {e}");
+            return;
+        }
+    };
+    let Manifest { team, scope, files_gz: _ } = manifest;
     let workspace = workspace_path(&team, &scope);
     if let Err(e) = fs::create_dir_all(&workspace) {
         println!("[{peer}] failed to create workspace {}: {e}", workspace.display());
