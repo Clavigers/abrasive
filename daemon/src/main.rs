@@ -264,17 +264,25 @@ fn run_build(stream: &mut TlsStream, peer: &str, workspace: &Path, req: BuildReq
         None => workspace.to_path_buf(),
     };
 
-    println!("[{peer}] mold -run cargo {} (in {})", cargo_args.join(" "), cd_target.display());
+    println!("[{peer}] mold -run cargo +nightly {} (in {})", cargo_args.join(" "), cd_target.display());
 
     let mut child = match Command::new("mold")
         .arg("-run")
         .arg("cargo")
+        .arg("+nightly")
         .args(&cargo_args)
         .current_dir(&cd_target)
         // Override [profile.dev] debug = "line-tables-only" without
         // touching the user's Cargo.toml. Backtraces still work; rustc
         // skips most DWARF generation. Big win on cold builds.
         .env("CARGO_PROFILE_DEV_DEBUG", "line-tables-only")
+        // Use the cranelift codegen backend for the dev profile.
+        // Cranelift is much faster than LLVM at producing unoptimized
+        // code, at the cost of slower runtime — perfect for dev builds.
+        // Requires nightly toolchain + rustc-codegen-cranelift-preview
+        // component installed on the remote.
+        .env("CARGO_UNSTABLE_CODEGEN_BACKEND", "true")
+        .env("CARGO_PROFILE_DEV_CODEGEN_BACKEND", "cranelift")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()

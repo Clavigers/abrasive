@@ -43,7 +43,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Command {
     /// Initialize abrasive for this project
-    RemoteInit,
+    Setup,
     /// Authenticate with the build server
     Auth,
     /// Print abrasive and cargo versions
@@ -61,6 +61,7 @@ enum Command {
 fn print_help() {
     println!("ABRASIVE {}\n", env!("CARGO_PKG_VERSION"));
     let _ = Cli::command().color(clap::ColorChoice::Always).print_help();
+    println!("\n");
     let _ = Cmd::new("cargo").arg("--help").status();
 }
 
@@ -81,11 +82,18 @@ fn print_version() {
     let _ = Cmd::new("cargo").arg("--version").status();
 }
 
-fn remote_init() {
-    todo!("remote_intit")
+fn remote_setup() {
+    // create the toml with an interactive menu where the user selects stuff 
+    // concurrent with that sync the source to the remote. hopefully by the 
+    // time the user is done selecting stuff the sync is already complete
+    // if not it just keeps syncing until its ready. 
+    todo!("remote_setup")
 }
 
 fn login() {
+    // open a browser authenticate with github. create a credentials folder
+    // on this machine that has the username and api key of the user, future
+    // protocol commands will maybe use 
     todo!("login")
 }
 
@@ -356,7 +364,7 @@ fn run() -> CliResult<ExitCode> {
     // Things Abrasive handles
     let cli = Cli::parse();
     match cli.command {
-        Some(Command::RemoteInit) => remote_init(),
+        Some(Command::Setup) => remote_setup(),
         Some(Command::Auth) => login(),
         Some(Command::Version) => print_version(),
         Some(Command::Help) => print_help(),
