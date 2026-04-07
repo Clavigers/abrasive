@@ -92,7 +92,9 @@ fn handle_sync(
     client_files: &[abrasive_protocol::FileEntry],
 ) -> std::io::Result<()> {
     // Diff against local state
+    let t0 = std::time::Instant::now();
     let local = local_manifest(workspace);
+    println!("[{peer}] local_manifest: {} files in {:?}", local.len(), t0.elapsed());
     let needed: Vec<String> = client_files
         .iter()
         .filter(|f| local.get(&f.path) != Some(&f.hash))
