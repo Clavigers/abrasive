@@ -6,9 +6,12 @@ use abrasive_protocol::{BuildRequest, FileEntry, Manifest, Message};
 use clap::builder::styling::{AnsiColor, Styles};
 use clap::{CommandFactory, Parser, Subcommand};
 use errors::{CliError, CliResult};
+use ignore::WalkBuilder;
+use rayon::prelude::*;
 use serde::Deserialize;
 use std::io::{self, Write};
 use std::net::{SocketAddr, TcpStream};
+use std::sync::mpsc::sync_channel;
 use std::time::Duration;
 use std::{
     env, fs,
@@ -99,9 +102,6 @@ fn login() {
 }
 
 fn build_manifest(root: &Path) -> Vec<FileEntry> {
-    use ignore::WalkBuilder;
-    use rayon::prelude::*;
-
     // 1. Walk (single-threaded; ignore's parallel walker is awkward to collect from)
     let paths: Vec<PathBuf> = WalkBuilder::new(root)
         .git_ignore(true)
@@ -184,9 +184,6 @@ fn sync_files(stream: &mut WsConn, root: &Path, team: &str, scope: &str) -> CliR
     // Pipeline: rayon workers read files from disk in parallel and push them
     // into a bounded channel; this thread drains the channel and writes to
     // the (single-writer) TLS stream. Order doesn't matter to the server.
-    use rayon::prelude::*;
-    use std::sync::mpsc::sync_channel;
-
     let (tx, rx) = sync_channel::<(String, Vec<u8>)>(32);
     let root_buf = root.to_path_buf();
     let needed_owned = needed.clone();

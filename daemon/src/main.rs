@@ -7,6 +7,7 @@ use std::fs;
 use std::io::{BufReader, Read};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
+use rayon::prelude::*;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::thread;
@@ -76,8 +77,6 @@ fn hash_file(path: &Path) -> Option<[u8; 32]> {
 }
 
 fn local_manifest(workspace: &Path) -> HashMap<String, [u8; 32]> {
-    use rayon::prelude::*;
-
     if !workspace.exists() {
         return HashMap::new();
     }
