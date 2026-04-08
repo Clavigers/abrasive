@@ -6,6 +6,9 @@
 [INFRA] Auto-deploy daemon to Hetzner on push to master (GitHub Actions: rsync daemon/, rebuild, restart systemd service) like netlify
 [INFRA] Get a real domain like abrasive-rs or abrasivebuild or something
 [INFRA] put abrasive on 1 million package managers
+[INFRA] Stand up reverse proxy (nginx/caddy) in front of the daemon on a real domain, terminate TLS there with Let's Encrypt — prerequisite for OAuth redirect URIs working
+[INFRA] After proxy lands: rip rustls + cert handling out of the daemon, have it accept plain TCP on loopback; delete certs/server.crt + server.key + the bundled cert in cli/tls.rs
+[INFRA] After proxy lands: switch CLI to public-CA trust (webpki-roots or system roots) instead of the bundled self-signed cert; can collapse cli/src/tls.rs to a single tungstenite::connect call
 
 [MARKETING] Make a real demo video
 [MARKETING] Make The getting started page real and good
@@ -45,16 +48,17 @@
 [CACHE] Optional sccache backend: opt-in flag in abrasive.toml that makes the daemon set `RUSTC_WRAPPER=sccache` + `SCCACHE_DIR=/dev/shm/sccache` + `CARGO_INCREMENTAL=0` instead of using the abrasive wrapper
 [PERF] Symlink `~/.cargo/registry` and `~/.cargo/git` to `/dev/shm/cargo-home/` (leave config + bin on disk)
 [PERF] Confirm `/tmp` is tmpfs on the remote (`mount | grep '/tmp '`); if not, enable `tmp.mount`
-[TRANSPORT] Convert raw TLS + custom `Header { length }` framing to WebSockets (`tokio-tungstenite` or `tungstenite`). Keep the rustls config and the bincode `Message` payloads as-is — only the framing layer changes. Auth becomes `Authorization: Bearer <token>` on the WS upgrade request, validated by the daemon before accepting the connection. Lets us delete the manual `recv_msg` `read_exact(SIZE)` ceremony and integrates cleanly with the planned GitHub OAuth login flow.
 [POLISH] Fix interleaved `[REMOTE]` prefix output: buffer until newline before prefixing each line, so chunks that arrive split mid-line don't render as `[REMOTE]    Compiling[REMOTE]  bytemuck v1.25.0`
 [POLISH] Surface remote environment errors (missing `pkg-config`, missing system libs from build scripts) more clearly in the CLI rather than hiding them in the cargo wall-of-text
 [POLISH] Make `--version` / `--help` work outside an abrasive workspace (currently they get filtered by `should_go_remote` and forwarded to cargo even though they're abrasive subcommands)
 [POLISH] Make "setup" command that syncs and interactively writes an abrasive.toml file
+[POLISH] WebSocket Ping/Pong keepalive: tungstenite doesn't auto-pong on the sync API; long builds may need an explicit ping loop or a read timeout policy to detect dead peers (right now we just silently `continue` past Ping/Pong frames)
+[POLISH] Replace `expect("ABRASIVE_TOKEN env var must be set")` panic in the daemon with a clean startup error once auth has a real config story
 
 ## ASAP
 
-websockets rewrite
-
 github auth
+[AUTH] Replace ABRASIVE_TOKEN env-var stub with the real GitHub OAuth flow on both client and daemon (token is currently a hardcoded shared secret read at daemon startup)
+[AUTH] Per-user token validation in the daemon (lookup, revocation, expiry) — current impl is a single string compare against env
 
 make multiple clones per scope (slots) M=4 add queue and fingerprint

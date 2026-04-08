@@ -2,20 +2,21 @@ mod errors;
 mod platform;
 mod tls;
 
-use abrasive_protocol::{BuildRequest, FileEntry, Header, Manifest, Message, decode, encode};
+use abrasive_protocol::{BuildRequest, FileEntry, Manifest, Message};
 use clap::builder::styling::{AnsiColor, Styles};
 use clap::{CommandFactory, Parser, Subcommand};
 use errors::{CliError, CliResult};
 use serde::Deserialize;
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::time::Duration;
-use tls::TlsStream;
 use std::{
     env, fs,
     path::{Path, PathBuf},
     process::{Command as Cmd, ExitCode},
 };
+use tls::WsConn;
+use tungstenite::Message as WsMessage;
 
 use crate::platform::host_triple;
 
@@ -83,17 +84,17 @@ fn print_version() {
 }
 
 fn remote_setup() {
-    // create the toml with an interactive menu where the user selects stuff 
-    // concurrent with that sync the source to the remote. hopefully by the 
+    // create the toml with an interactive menu where the user selects stuff
+    // concurrent with that sync the source to the remote. hopefully by the
     // time the user is done selecting stuff the sync is already complete
-    // if not it just keeps syncing until its ready. 
+    // if not it just keeps syncing until its ready.
     todo!("remote_setup")
 }
 
 fn login() {
     // open a browser authenticate with github. create a credentials folder
     // on this machine that has the username and api key of the user, future
-    // protocol commands will maybe use 
+    // protocol commands will maybe use
     todo!("login")
 }
 
@@ -124,36 +125,50 @@ fn build_manifest(root: &Path) -> Vec<FileEntry> {
         .collect()
 }
 
-fn send_frame(stream: &mut TlsStream, msg: &Message) -> CliResult<()> {
-    let frame = encode(msg);
-    stream.write_all(&frame)?;
+fn ws_err(e: tungstenite::Error) -> CliError {
+    match e {
+        tungstenite::Error::Io(io) => io.into(),
+        _ => CliError::disconnected(),
+    }
+}
+
+fn send_frame(ws: &mut WsConn, msg: &Message) -> CliResult<()> {
+    let payload = abrasive_protocol::serialize(msg);
+    ws.send(WsMessage::Binary(payload)).map_err(ws_err)?;
     Ok(())
 }
 
-fn recv_frame(stream: &mut TlsStream) -> CliResult<Message> {
-    let mut header_buf = [0u8; Header::SIZE];
-    stream
-        .read_exact(&mut header_buf)
-        .map_err(|_| CliError::disconnected())?;
-    let header = Header::from_bytes(&header_buf);
-    let mut raw = vec![0u8; Header::SIZE + header.length as usize];
-    raw[..Header::SIZE].copy_from_slice(&header_buf);
-    stream.read_exact(&mut raw[Header::SIZE..])?;
-    Ok(decode(&raw)?.message)
+fn recv_frame(ws: &mut WsConn) -> CliResult<Message> {
+    loop {
+        match ws.read().map_err(ws_err)? {
+            WsMessage::Binary(data) => return Ok(abrasive_protocol::deserialize(&data)?),
+            WsMessage::Ping(_) | WsMessage::Pong(_) => continue,
+            WsMessage::Close(_) => return Err(CliError::disconnected()),
+            // We never send text frames; ignore stray ones from libraries.
+            WsMessage::Text(_) | WsMessage::Frame(_) => continue,
+        }
+    }
 }
 
-fn sync_files(stream: &mut TlsStream, root: &Path, team: &str, scope: &str) -> CliResult<()> {
+fn sync_files(stream: &mut WsConn, root: &Path, team: &str, scope: &str) -> CliResult<()> {
     eprintln!("[sync] scanning files...");
     let files = build_manifest(root);
     eprintln!("[sync] {} files in manifest", files.len());
 
     let files_gz = Manifest::encode_files(&files);
-    eprintln!("[sync] manifest: {} entries, {} bytes gzipped", files.len(), files_gz.len());
-    send_frame(stream, &Message::Manifest(Manifest {
-        team: team.to_string(),
-        scope: scope.to_string(),
-        files_gz,
-    }))?;
+    eprintln!(
+        "[sync] manifest: {} entries, {} bytes gzipped",
+        files.len(),
+        files_gz.len()
+    );
+    send_frame(
+        stream,
+        &Message::Manifest(Manifest {
+            team: team.to_string(),
+            scope: scope.to_string(),
+            files_gz,
+        }),
+    )?;
 
     // Server tells us what it needs
     let needed = match recv_frame(stream)? {
@@ -207,26 +222,37 @@ fn try_remote(ctx: &WorkspaceContext, cargo_args: Vec<String>) -> CliResult<Exit
         return forward_args_to_local();
     }
 
+    // TEMPORARY: bearer token via env var until the GitHub OAuth flow lands.
+    let token = env::var("ABRASIVE_TOKEN").unwrap_or_default();
+
     let addr: SocketAddr = format!("{}:{}", IP, PORT).parse().unwrap();
-    let tcp = TcpStream::connect_timeout(&addr, Duration::from_secs(5))
-        .map_err(CliError::connect)?;
+    let tcp =
+        TcpStream::connect_timeout(&addr, Duration::from_secs(5)).map_err(CliError::connect)?;
     tcp.set_read_timeout(Some(Duration::from_secs(300)))?;
     tcp.set_write_timeout(Some(Duration::from_secs(30)))?;
 
-    let mut stream: TlsStream = tls::connect(tcp)?;
+    let mut stream: WsConn = tls::connect(tcp, &token).map_err(CliError::connect)?;
 
     // Sync files first
-    sync_files(&mut stream, &ctx.root_dir, &ctx.config.team, &ctx.config.scope)?;
+    sync_files(
+        &mut stream,
+        &ctx.root_dir,
+        &ctx.config.remote.team,
+        &ctx.config.remote.scope,
+    )?;
 
     // Send build request
     let host_platform = host_triple();
-    send_frame(&mut stream, &Message::BuildRequest(BuildRequest {
-        cargo_args,
-        subdir: ctx.subdir.clone(),
-        host_platform,
-        team: ctx.config.team.clone(),
-        scope: ctx.config.scope.clone(),
-    }))?;
+    send_frame(
+        &mut stream,
+        &Message::BuildRequest(BuildRequest {
+            cargo_args,
+            subdir: ctx.subdir.clone(),
+            host_platform,
+            team: ctx.config.remote.team.clone(),
+            scope: ctx.config.remote.scope.clone(),
+        }),
+    )?;
 
     // Stream build output
     loop {
@@ -265,7 +291,7 @@ struct WorkspaceContext {
     root_dir: PathBuf,
     /// None if abrasive is called from the workspace root
     subdir: Option<String>,
-    config: RemoteConfig,
+    config: AbrasiveConfig,
 }
 
 impl WorkspaceContext {
@@ -277,15 +303,13 @@ impl WorkspaceContext {
 
         let subdir = relative_subdir(&root_dir, called_from)?;
 
-        let config_str = fs::read_to_string(config_path)
-            .map_err(|e| CliError::invalid_path(format!("cannot read abrasive.toml: {e}")))?;
-        let parsed: AbrasiveConfig = toml::from_str(&config_str)
-            .map_err(|e| CliError::invalid_path(format!("invalid abrasive.toml: {e}")))?;
+        let config = fs::read_to_string(config_path).map_err(|_| CliError::no_toml())?;
+        let config: AbrasiveConfig = toml::from_str(&config)?;
 
         Ok(Self {
             root_dir,
             subdir,
-            config: parsed.remote,
+            config,
         })
     }
 }
@@ -379,9 +403,6 @@ fn run() -> CliResult<ExitCode> {
 fn main() -> ExitCode {
     match run() {
         Ok(code) => code,
-        Err(e) => {
-            eprintln!("{e}");
-            e.exit_code
-        }
+        Err(e) => e.exit(),
     }
 }

@@ -23,6 +23,12 @@ pub enum CliErrorKind {
     #[error("invalid path, path contains non-UTF-8 characters {0}")]
     InvalidPath(String),
 
+    #[error("cannot read abrasive.toml")]
+    NoToml,
+
+    #[error("invalid path, path contains non-UTF-8 characters {0}")]
+    InvalidToml(String),
+
     #[error("cannot determine current directory: {0}")]
     NoCwd(std::io::Error),
 
@@ -54,6 +60,20 @@ impl CliError {
         }
     }
 
+    pub fn no_toml() -> Self {
+        Self {
+            kind: CliErrorKind::NoToml,
+            exit_code: ExitCode::FAILURE,
+        }
+    }
+
+    pub fn invalid_toml(msg: String) -> Self {
+        Self {
+            kind: CliErrorKind::InvalidToml(msg),
+            exit_code: ExitCode::FAILURE,
+        }
+    }
+
     pub fn no_cwd(e: std::io::Error) -> Self {
         Self {
             kind: CliErrorKind::NoCwd(e),
@@ -67,6 +87,11 @@ impl CliError {
             kind: CliErrorKind::CargoNotFound(e),
             exit_code: ExitCode::from(127),
         }
+    }
+
+    pub fn exit(&self) -> ExitCode {
+        eprintln!("{}", self.kind);
+        self.exit_code
     }
 }
 
@@ -96,5 +121,11 @@ impl From<std::io::Error> for CliError {
 impl From<abrasive_protocol::DecodeError> for CliError {
     fn from(e: abrasive_protocol::DecodeError) -> Self {
         CliErrorKind::Protocol(e).into()
+    }
+}
+
+impl From<toml::de::Error> for CliError {
+    fn from(e: toml::de::Error) -> Self {
+        CliErrorKind::InvalidToml(e.to_string()).into()
     }
 }
