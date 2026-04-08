@@ -67,13 +67,6 @@ impl CliError {
         }
     }
 
-    pub fn invalid_toml(msg: String) -> Self {
-        Self {
-            kind: CliErrorKind::InvalidToml(msg),
-            exit_code: ExitCode::FAILURE,
-        }
-    }
-
     pub fn no_cwd(e: std::io::Error) -> Self {
         Self {
             kind: CliErrorKind::NoCwd(e),
