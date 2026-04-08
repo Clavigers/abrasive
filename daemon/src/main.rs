@@ -1,20 +1,27 @@
-use abrasive_protocol::{decode, encode, BuildRequest, Header, Manifest, Message, PlatformTriple};
+use abrasive_protocol::{BuildRequest, Manifest, Message, PlatformTriple};
 use std::env;
 use rustls::ServerConnection;
 use rustls::StreamOwned;
 use std::collections::HashMap;
 use std::fs;
-use std::io::{BufReader, Read, Write};
+use std::io::{BufReader, Read};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
+use rayon::prelude::*;
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::thread;
+use tungstenite::Message as WsMessage;
+use tungstenite::WebSocket;
+use tungstenite::handshake::HandshakeError;
+use tungstenite::handshake::server::{ErrorResponse, Request, Response};
+use tungstenite::http;
 
 /// Commands that accept --target
 const TARGET_COMMANDS: &[&str] = &["build", "check", "test", "bench", "clippy", "doc"];
 
 type TlsStream = StreamOwned<ServerConnection, TcpStream>;
+type WsConn = WebSocket<TlsStream>;
 
 fn load_tls_config() -> Arc<rustls::ServerConfig> {
     let cert_file = fs::File::open("server.crt").expect("cannot open server.crt");
@@ -35,22 +42,33 @@ fn load_tls_config() -> Arc<rustls::ServerConfig> {
     Arc::new(config)
 }
 
-fn recv_msg(stream: &mut TlsStream) -> std::io::Result<Message> {
-    let mut header_buf = [0u8; Header::SIZE];
-    stream.read_exact(&mut header_buf)?;
-    let header = Header::from_bytes(&header_buf);
-    let mut raw = vec![0u8; Header::SIZE + header.length as usize];
-    raw[..Header::SIZE].copy_from_slice(&header_buf);
-    stream.read_exact(&mut raw[Header::SIZE..])?;
-    decode(&raw)
-        .map(|f| f.message)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))
+fn ws_to_io(e: tungstenite::Error) -> std::io::Error {
+    match e {
+        tungstenite::Error::Io(io) => io,
+        other => std::io::Error::new(std::io::ErrorKind::Other, other.to_string()),
+    }
 }
 
-fn send_msg(stream: &mut TlsStream, msg: &Message) -> std::io::Result<()> {
-    let frame = encode(msg);
-    stream.write_all(&frame)?;
-    stream.flush()
+fn recv_msg(ws: &mut WsConn) -> std::io::Result<Message> {
+    loop {
+        match ws.read().map_err(ws_to_io)? {
+            WsMessage::Binary(data) => {
+                return abrasive_protocol::deserialize(&data)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()));
+            }
+            WsMessage::Ping(_) | WsMessage::Pong(_) => continue,
+            WsMessage::Close(_) => {
+                return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "client closed"));
+            }
+            WsMessage::Text(_) | WsMessage::Frame(_) => continue,
+        }
+    }
+}
+
+fn send_msg(ws: &mut WsConn, msg: &Message) -> std::io::Result<()> {
+    let payload = abrasive_protocol::serialize(msg);
+    ws.send(WsMessage::Binary(payload)).map_err(ws_to_io)?;
+    Ok(())
 }
 
 fn hash_file(path: &Path) -> Option<[u8; 32]> {
@@ -59,8 +77,6 @@ fn hash_file(path: &Path) -> Option<[u8; 32]> {
 }
 
 fn local_manifest(workspace: &Path) -> HashMap<String, [u8; 32]> {
-    use rayon::prelude::*;
-
     if !workspace.exists() {
         return HashMap::new();
     }
@@ -86,7 +102,7 @@ fn local_manifest(workspace: &Path) -> HashMap<String, [u8; 32]> {
 }
 
 fn handle_sync(
-    stream: &mut TlsStream,
+    stream: &mut WsConn,
     workspace: &Path,
     peer: &str,
     client_files: &[abrasive_protocol::FileEntry],
@@ -136,7 +152,7 @@ fn handle_sync(
     Ok(())
 }
 
-fn handle(tcp_stream: TcpStream, tls_config: Arc<rustls::ServerConfig>) {
+fn handle(tcp_stream: TcpStream, tls_config: Arc<rustls::ServerConfig>, expected_token: Arc<String>) {
     let peer = tcp_stream
         .peer_addr()
         .map(|a| a.to_string())
@@ -150,7 +166,41 @@ fn handle(tcp_stream: TcpStream, tls_config: Arc<rustls::ServerConfig>) {
             return;
         }
     };
-    let mut stream = StreamOwned::new(tls_conn, tcp_stream);
+    let tls_stream = StreamOwned::new(tls_conn, tcp_stream);
+
+    // WebSocket upgrade with bearer token validation. Reject early with
+    // 401 before doing any protocol work.
+    let expected_header = format!("Bearer {expected_token}");
+    let auth_ok = std::cell::Cell::new(false);
+    let ws_result = tungstenite::accept_hdr(tls_stream, |req: &Request, resp: Response| {
+        let presented = req
+            .headers()
+            .get("Authorization")
+            .and_then(|v| v.to_str().ok());
+        if presented == Some(expected_header.as_str()) {
+            auth_ok.set(true);
+            Ok(resp)
+        } else {
+            let mut err: ErrorResponse = http::Response::new(Some("invalid token".to_string()));
+            *err.status_mut() = http::StatusCode::UNAUTHORIZED;
+            Err(err)
+        }
+    });
+    let mut stream: WsConn = match ws_result {
+        Ok(ws) => ws,
+        Err(HandshakeError::Failure(e)) => {
+            if !auth_ok.get() {
+                println!("[{peer}] rejected: bad/missing bearer token");
+            } else {
+                println!("[{peer}] ws handshake failed: {e}");
+            }
+            return;
+        }
+        Err(HandshakeError::Interrupted(_)) => {
+            println!("[{peer}] ws handshake interrupted");
+            return;
+        }
+    };
 
     let manifest = match recv_msg(&mut stream) {
         Ok(Message::Manifest(m)) => m,
@@ -247,7 +297,7 @@ fn workspace_path(team: &str, scope: &str) -> PathBuf {
     PathBuf::from(format!("{}/{}_{}", home, team, scope))
 }
 
-fn run_build(stream: &mut TlsStream, peer: &str, workspace: &Path, req: BuildRequest) {
+fn run_build(stream: &mut WsConn, peer: &str, workspace: &Path, req: BuildRequest) {
     let BuildRequest {
         cargo_args,
         subdir,
@@ -344,8 +394,7 @@ fn run_build(stream: &mut TlsStream, peer: &str, workspace: &Path, req: BuildReq
     ) {
         println!("[{peer}] failed to send BuildFinished: {e}");
     }
-    let _ = stream.conn.send_close_notify();
-    let _ = stream.flush();
+    let _ = stream.close(None);
     println!("[{peer}] done");
 }
 
@@ -382,10 +431,16 @@ fn amend_args_with_platform(mut args: Vec<String>, platform: PlatformTriple) -> 
 
 fn main() {
     let tls_config = load_tls_config();
+    // TEMPORARY: shared bearer token via env var until GitHub OAuth lands.
+    let expected_token = Arc::new(
+        env::var("ABRASIVE_TOKEN")
+            .expect("ABRASIVE_TOKEN env var must be set"),
+    );
     let listener = TcpListener::bind("0.0.0.0:8400").unwrap();
-    println!("abrasived TEST listening on :8400 (TLS)");
+    println!("abrasived TEST listening on :8400 (TLS+WS)");
     for stream in listener.incoming().flatten() {
         let config = tls_config.clone();
-        thread::spawn(move || handle(stream, config));
+        let token = expected_token.clone();
+        thread::spawn(move || handle(stream, config, token));
     }
 }

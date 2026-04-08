@@ -5,8 +5,9 @@ edition = "2024"
 
 [dependencies]
 abrasive-protocol = { path = "../protocol" }
-rustls = "0.23"
+rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
 rustls-pemfile = "2"
 blake3 = "1"
 walkdir = "2"
 rayon = "1"
+tungstenite = "0.23"

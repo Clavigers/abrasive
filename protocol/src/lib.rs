@@ -3,32 +3,6 @@ mod errors;
 pub use errors::DecodeError;
 
 use serde::{Deserialize, Serialize};
-use std::mem;
-
-pub struct Frame {
-    pub header: Header,
-    pub message: Message,
-}
-
-#[derive(Debug, Clone, Copy)]
-#[repr(C, packed)]
-pub struct Header {
-    pub length: u32,
-}
-
-impl Header {
-    pub const SIZE: usize = mem::size_of::<Self>();
-
-    pub fn from_bytes(buf: &[u8; Self::SIZE]) -> Self {
-        Header {
-            length: u32::from_be_bytes(*buf),
-        }
-    }
-
-    pub fn to_bytes(&self) -> [u8; Self::SIZE] {
-        self.length.to_be_bytes()
-    }
-}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Message {
@@ -137,18 +111,13 @@ pub struct BuildRequest {
     pub scope: String,
 }
 
-pub fn encode(msg: &Message) -> Vec<u8> {
-    let payload = bincode::serialize(msg).unwrap();
-    let header = Header {
-        length: payload.len() as u32,
-    };
-    let mut frame = header.to_bytes().to_vec();
-    frame.extend(payload);
-    frame
+/// Serialize a Message into a bincode payload. WebSocket framing handles
+/// length-prefixing for us, so this is just the raw bincode bytes.
+pub fn serialize(msg: &Message) -> Vec<u8> {
+    bincode::serialize(msg).unwrap()
 }
 
-pub fn decode(raw: &[u8]) -> Result<Frame, DecodeError> {
-    let header = Header::from_bytes(raw[..Header::SIZE].try_into().unwrap());
-    let message = bincode::deserialize(&raw[Header::SIZE..]).map_err(DecodeError)?;
-    Ok(Frame { header, message })
+/// Deserialize a Message from a bincode payload received over WebSockets.
+pub fn deserialize(raw: &[u8]) -> Result<Message, DecodeError> {
+    bincode::deserialize(raw).map_err(DecodeError)
 }
