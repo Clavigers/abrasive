@@ -21,15 +21,9 @@
 [IDEA] make the init / setup command ask you questions in the foreground while the repo is being synced in the background
 [IDEA] get the sync stuff to be faster (maybe by creating something more like a merkle tree / or just a 32 bit everything hash that can be calculated quickly and potentially stored somewhere)
 
-[SYNC] Two-tier digest fast path: client sends `ManifestDigest { team, scope, blake3(sorted_manifest) }` first; daemon caches last-accepted digest per `(team, scope)`; on hit reply `ManifestUpToDate` and skip the full manifest exchange entirely
 [SYNC] Opt-in `ignore_globs` field in `abrasive.toml` to exclude source files that aren't part of the build (docs, fixtures, tooling) from the sync entirely
 [SYNC] Opt-in `ignore_env` field in `abrasive.toml` listing env vars (or globs) the client should NOT forward to the remote build
-[FARM] Refactor `workspace_path` to return a routed slot path (`~/{team}_{scope}/slot_N/`) instead of `~/{team}_{scope}/`; start with M=1 and a "always slot 0" router as a no-op refactor
 [FARM] Use the authenticated user identity (from the existing auth/login step) as the slot key — no separate fingerprint needed
-[FARM] Implement per-`(team, scope)` slot pool in the daemon: `Vec<Slot>` with `current_user: Option<String>`, `last_used: Instant`, hardcoded M=4
-[FARM] Routing policy: take the slot you used last time (matching authed user) if it's free, else take any free slot (clobbering whoever was there), else queue. That's it.
-[FARM] Add capacity-based LRU eviction when pool is full and a new user arrives with no free slot
-[FARM] Print routed slot id in the CLI output so devs can debug "why was my build slow"
 [CACHE] New crate `abrasive-rustc-wrapper` that the daemon spawns as `RUSTC_WRAPPER`; first version is pure passthrough, just logs the rustc invocation it sees
 [CACHE] Wire the daemon's cargo spawn to set `RUSTC_WRAPPER=/path/to/abrasive-rustc-wrapper`
 [CACHE] Parse rustc command line in the wrapper: extract `--crate-name`, source root, `--out-dir`, `--extern` deps with `.rmeta` paths, `-C` flags, edition, target, etc.
