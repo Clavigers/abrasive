@@ -1,4 +1,6 @@
 mod auth;
+mod constants;
+mod errors;
 
 use abrasive_protocol::{BuildRequest, Manifest, Message, PlatformTriple};
 use std::env;
@@ -171,12 +173,10 @@ fn handle(tcp_stream: TcpStream, tls_config: Arc<rustls::ServerConfig>) {
     let tls_stream = StreamOwned::new(tls_conn, tcp_stream);
 
     // WebSocket upgrade with GitHub token validation. We pull the bearer
-    // token out of the Authorization header, then in the handshake
-    // callback we call GitHub's API to confirm (a) the token is valid
-    // and (b) the user is a member of the required org. Reject with 401
-    // before doing any protocol work.
+    // token out of the Authorization header, then call GitHub's API to
+    // confirm (a) the token is valid and (b) the user is a member of
+    // the required org. Reject with 401 before doing any protocol work.
     let github_login: std::cell::RefCell<Option<String>> = std::cell::RefCell::new(None);
-    let auth_ok = std::cell::Cell::new(false);
     let ws_result = tungstenite::accept_hdr(tls_stream, |req: &Request, resp: Response| {
         let presented = req
             .headers()
@@ -187,6 +187,7 @@ fn handle(tcp_stream: TcpStream, tls_config: Arc<rustls::ServerConfig>) {
         let token = match presented {
             Some(t) if !t.is_empty() => t,
             _ => {
+                println!("[{peer}] auth rejected: missing bearer token");
                 let mut err: ErrorResponse =
                     http::Response::new(Some("missing bearer token".to_string()));
                 *err.status_mut() = http::StatusCode::UNAUTHORIZED;
@@ -197,12 +198,11 @@ fn handle(tcp_stream: TcpStream, tls_config: Arc<rustls::ServerConfig>) {
         match auth::validate(token) {
             Ok(login) => {
                 *github_login.borrow_mut() = Some(login);
-                auth_ok.set(true);
                 Ok(resp)
             }
             Err(reason) => {
                 println!("[{peer}] auth rejected: {reason}");
-                let mut err: ErrorResponse = http::Response::new(Some(reason));
+                let mut err: ErrorResponse = http::Response::new(Some(reason.to_string()));
                 *err.status_mut() = http::StatusCode::UNAUTHORIZED;
                 Err(err)
             }
@@ -211,11 +211,7 @@ fn handle(tcp_stream: TcpStream, tls_config: Arc<rustls::ServerConfig>) {
     let mut stream: WsConn = match ws_result {
         Ok(ws) => ws,
         Err(HandshakeError::Failure(e)) => {
-            if !auth_ok.get() {
-                println!("[{peer}] rejected: bad/missing/unauthorized github token");
-            } else {
-                println!("[{peer}] ws handshake failed: {e}");
-            }
+            println!("[{peer}] ws handshake failed: {e}");
             return;
         }
         Err(HandshakeError::Interrupted(_)) => {
