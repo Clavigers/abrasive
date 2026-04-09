@@ -222,8 +222,7 @@ fn try_remote(ctx: &WorkspaceContext, cargo_args: Vec<String>) -> CliResult<Exit
         return forward_args_to_local();
     }
 
-    let token = auth::saved_token()
-        .ok_or_else(|| CliError::auth("no saved token, run `abrasive-cli auth` first".into()))?;
+    let token = auth::saved_token().ok_or(errors::AuthError::NoSavedToken)?;
 
     let addr: SocketAddr = format!("{}:{}", IP, PORT).parse().unwrap();
     let tcp =

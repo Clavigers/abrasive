@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
 
-use crate::errors::{CliError, CliResult};
+use crate::errors::AuthError;
 
 /// Public OAuth App client_id for the "Claviger" GitHub OAuth App.
 /// Not a secret — it identifies the app to GitHub. Device flow does
@@ -29,6 +29,7 @@ const SCOPES: &str = "read:org";
 
 const DEVICE_CODE_URL: &str = "https://github.com/login/device/code";
 const ACCESS_TOKEN_URL: &str = "https://github.com/login/oauth/access_token";
+const DEVICE_CODE_GRANT_TYPE: &str = "urn:ietf:params:oauth:grant-type:device_code";
 
 #[derive(Deserialize)]
 struct DeviceCodeResp {
@@ -44,81 +45,87 @@ pub fn saved_token() -> Option<String> {
 }
 
 /// Always runs the device flow, replacing any saved token.
-pub fn login() -> CliResult<String> {
+pub fn login() -> Result<String, AuthError> {
     let token = device_flow()?;
     if let Err(e) = write_saved_token(&token) {
-        eprintln!("[auth] warning: could not save token: {e}");
+        eprintln!("[auth] warning: {e}");
     }
     Ok(token)
 }
 
-fn device_flow() -> CliResult<String> {
+fn device_flow() -> Result<String, AuthError> {
     let agent = ureq::agent();
+    let resp = request_device_code(&agent)?;
+    print_user_instructions(&resp);
+    poll_for_token(&agent, &resp)
+}
 
-    // Step 1: request a device + user code.
-    let resp: DeviceCodeResp = agent
+fn request_device_code(agent: &ureq::Agent) -> Result<DeviceCodeResp, AuthError> {
+    agent
         .post(DEVICE_CODE_URL)
         .set("Accept", "application/json")
         .send_form(&[("client_id", GITHUB_CLIENT_ID), ("scope", SCOPES)])
-        .map_err(|e| CliError::auth(format!("device code request failed: {e}")))?
+        .map_err(AuthError::DeviceCodeRequest)?
         .into_json()
-        .map_err(|e| CliError::auth(format!("device code response parse failed: {e}")))?;
+        .map_err(AuthError::DeviceCodeParse)
+}
 
-    eprintln!();
-    eprintln!("To authenticate, visit:");
-    eprintln!("    {}", resp.verification_uri);
-    eprintln!("And enter the code:");
-    eprintln!("    {}", resp.user_code);
-    eprintln!();
-    eprintln!("Waiting for authorization...");
+fn print_user_instructions(resp: &DeviceCodeResp) {
+    eprintln!(
+        "\n\
+         To authenticate, visit:\n\
+         \x20   {}\n\
+         And enter the code:\n\
+         \x20   {}\n\n\
+         Waiting for authorization...",
+        resp.verification_uri, resp.user_code,
+    );
     let _ = std::io::stderr().flush();
+}
 
-    // Step 2: poll for the access token.
+fn poll_for_token(agent: &ureq::Agent, resp: &DeviceCodeResp) -> Result<String, AuthError> {
     let mut interval = Duration::from_secs(resp.interval.max(1));
     loop {
         thread::sleep(interval);
-
-        let json: Value = agent
-            .post(ACCESS_TOKEN_URL)
-            .set("Accept", "application/json")
-            .send_form(&[
-                ("client_id", GITHUB_CLIENT_ID),
-                ("device_code", &resp.device_code),
-                (
-                    "grant_type",
-                    "urn:ietf:params:oauth:grant-type:device_code",
-                ),
-            ])
-            .map_err(|e| CliError::auth(format!("token poll failed: {e}")))?
-            .into_json()
-            .map_err(|e| CliError::auth(format!("token poll parse failed: {e}")))?;
-
-        if let Some(token) = json.get("access_token").and_then(|v| v.as_str()) {
+        let json = poll_once(agent, &resp.device_code)?;
+        if let Some(t) = json.get("access_token").and_then(|v| v.as_str()) {
             eprintln!("[auth] success");
-            return Ok(token.to_string());
+            break Ok(t.to_string());
         }
+        handle_poll_error(json, &mut interval)?;
+    }
+}
 
-        match json.get("error").and_then(|v| v.as_str()) {
-            Some("authorization_pending") => continue,
-            Some("slow_down") => {
-                interval += Duration::from_secs(5);
-                continue;
-            }
-            Some("expired_token") => {
-                return Err(CliError::auth(
-                    "device code expired before authorization; run again".into(),
-                ));
-            }
-            Some("access_denied") => {
-                return Err(CliError::auth("authorization denied".into()));
-            }
-            Some(other) => {
-                return Err(CliError::auth(format!("github error: {other}")));
-            }
-            None => {
-                return Err(CliError::auth(format!("unexpected token response: {json}")));
-            }
+fn poll_once(agent: &ureq::Agent, device_code: &str) -> Result<Value, AuthError> {
+    agent
+        .post(ACCESS_TOKEN_URL)
+        .set("Accept", "application/json")
+        .send_form(&[
+            ("client_id", GITHUB_CLIENT_ID),
+            ("device_code", device_code),
+            ("grant_type", DEVICE_CODE_GRANT_TYPE),
+        ])
+        .map_err(AuthError::TokenPoll)?
+        .into_json()
+        .map_err(AuthError::TokenPollParse)
+}
+
+fn handle_poll_error(json: Value, interval: &mut Duration) -> Result<(), AuthError> {
+    let err_str = json
+        .get("error")
+        .and_then(|v| v.as_str())
+        .map(String::from)
+        .ok_or(AuthError::UnexpectedResponse(json))?;
+    
+    match err_str.as_str() {
+        "authorization_pending" => Ok(()),
+        "slow_down" => {
+            *interval += Duration::from_secs(5);
+            Ok(())
         }
+        "expired_token" => Err(AuthError::DeviceCodeExpired),
+        "access_denied" => Err(AuthError::AuthorizationDenied),
+        _ => Err(AuthError::GitHub(err_str)),
     }
 }
 
@@ -140,13 +147,12 @@ fn read_saved_token() -> Option<String> {
     }
 }
 
-fn write_saved_token(token: &str) -> std::io::Result<()> {
-    let path = token_path()
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no HOME"))?;
+fn write_saved_token(token: &str) -> Result<(), AuthError> {
+    let path = token_path().ok_or(AuthError::NoHome)?;
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+        fs::create_dir_all(parent).map_err(AuthError::WriteToken)?;
     }
-    fs::write(&path, token)?;
+    fs::write(&path, token).map_err(AuthError::WriteToken)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
