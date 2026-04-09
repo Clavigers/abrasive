@@ -15,6 +15,10 @@ pub enum Message {
     BuildStdout(Vec<u8>),
     BuildStderr(Vec<u8>),
     BuildFinished { exit_code: u8 },
+    /// Server-side rejection: all slots for this (team, scope) are
+    /// currently busy. The client should sleep and retry the whole
+    /// connection. Sent in place of NeedFiles.
+    SlotsBusy,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
