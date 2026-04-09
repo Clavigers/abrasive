@@ -116,7 +116,7 @@ fn handle_poll_error(json: Value, interval: &mut Duration) -> Result<(), AuthErr
         .and_then(|v| v.as_str())
         .map(String::from)
         .ok_or(AuthError::UnexpectedResponse(json))?;
-    
+
     match err_str.as_str() {
         "authorization_pending" => Ok(()),
         "slow_down" => {
