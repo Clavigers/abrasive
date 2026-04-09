@@ -13,6 +13,7 @@ use serde::Deserialize;
 use std::io::{self, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::sync::mpsc::sync_channel;
+use std::thread;
 use std::time::Duration;
 use std::{
     env, fs,
@@ -153,66 +154,76 @@ fn recv_frame(ws: &mut WsConn) -> CliResult<Message> {
     }
 }
 
-fn sync_files(stream: &mut WsConn, root: &Path, team: &str, scope: &str) -> CliResult<()> {
+enum SyncOutcome {
+    Ready(Vec<String>),
+    SlotsBusy,
+}
+
+fn start_sync(
+    stream: &mut WsConn,
+    root: &Path,
+    team: &str,
+    scope: &str,
+) -> CliResult<SyncOutcome> {
+    let manifest = build_and_log_manifest(root, team, scope);
+    send_frame(stream, &Message::Manifest(manifest))?;
+    match recv_frame(stream)? {
+        Message::NeedFiles(paths) => Ok(SyncOutcome::Ready(paths)),
+        Message::SlotsBusy => Ok(SyncOutcome::SlotsBusy),
+        other => {
+            eprintln!("[sync] unexpected message: {other:?}");
+            Err(CliError::disconnected())
+        }
+    }
+}
+
+fn build_and_log_manifest(root: &Path, team: &str, scope: &str) -> Manifest {
     eprintln!("[sync] scanning files...");
     let files = build_manifest(root);
-    eprintln!("[sync] {} files in manifest", files.len());
-
     let files_gz = Manifest::encode_files(&files);
     eprintln!(
         "[sync] manifest: {} entries, {} bytes gzipped",
         files.len(),
         files_gz.len()
     );
-    send_frame(
-        stream,
-        &Message::Manifest(Manifest {
-            team: team.to_string(),
-            scope: scope.to_string(),
-            files_gz,
-        }),
-    )?;
+    Manifest {
+        team: team.to_string(),
+        scope: scope.to_string(),
+        files_gz,
+    }
+}
 
-    // Server tells us what it needs
-    let needed = match recv_frame(stream)? {
-        Message::NeedFiles(paths) => paths,
-        other => {
-            eprintln!("[sync] unexpected message: {other:?}");
-            return Err(CliError::disconnected());
-        }
-    };
-
+fn stream_files(stream: &mut WsConn, root: &Path, needed: Vec<String>) -> CliResult<()> {
     eprintln!("[sync] sending {} files", needed.len());
-
-    // Pipeline: rayon workers read files from disk in parallel and push them
-    // into a bounded channel; this thread drains the channel and writes to
-    // the (single-writer) TLS stream. Order doesn't matter to the server.
     let (tx, rx) = sync_channel::<(String, Vec<u8>)>(32);
     let root_buf = root.to_path_buf();
-    let needed_owned = needed.clone();
-    let producer = std::thread::spawn(move || {
-        needed_owned.par_iter().for_each_with(tx, |tx, path| {
+    let producer = thread::spawn(move || {
+        needed.par_iter().for_each_with(tx, |tx, path| {
             if let Ok(contents) = fs::read(root_buf.join(path)) {
                 let _ = tx.send((path.clone(), contents));
             }
         });
     });
-
     for (path, contents) in rx {
         send_frame(stream, &Message::FileData { path, contents })?;
     }
     let _ = producer.join();
+    send_frame(stream, &Message::SyncDone)
+}
 
-    send_frame(stream, &Message::SyncDone)?;
-
-    // Wait for ack
+fn wait_for_sync_ack(stream: &mut WsConn) -> CliResult<()> {
     match recv_frame(stream)? {
-        Message::SyncAck => {}
-        _ => return Err(CliError::disconnected()),
+        Message::SyncAck => {
+            eprintln!("[sync] done");
+            Ok(())
+        }
+        _ => Err(CliError::disconnected()),
     }
+}
 
-    eprintln!("[sync] done");
-    Ok(())
+enum BuildOutcome {
+    Done(ExitCode),
+    SlotsBusy,
 }
 
 fn try_remote(ctx: &WorkspaceContext, cargo_args: Vec<String>) -> CliResult<ExitCode> {
@@ -221,42 +232,74 @@ fn try_remote(ctx: &WorkspaceContext, cargo_args: Vec<String>) -> CliResult<Exit
     if !should_go_remote(&cargo_args) {
         return forward_args_to_local();
     }
-
     let token = auth::saved_token().ok_or(errors::AuthError::NoSavedToken)?;
+    poll_for_build(ctx, cargo_args, &token)
+}
 
+fn poll_for_build(
+    ctx: &WorkspaceContext,
+    cargo_args: Vec<String>,
+    token: &str,
+) -> CliResult<ExitCode> {
+    loop {
+        match attempt_build(ctx, &cargo_args, token)? {
+            BuildOutcome::Done(code) => break Ok(code),
+            BuildOutcome::SlotsBusy => {
+                eprintln!("[abrasive] all build slots on the server are busy, retrying in 2s...");
+                thread::sleep(Duration::from_secs(2));
+            }
+        }
+    }
+}
+
+fn attempt_build(
+    ctx: &WorkspaceContext,
+    cargo_args: &[String],
+    token: &str,
+) -> CliResult<BuildOutcome> {
+    let mut stream = open_connection(token)?;
+    let team = &ctx.config.remote.team;
+    let scope = &ctx.config.remote.scope;
+    match start_sync(&mut stream, &ctx.root_dir, team, scope)? {
+        SyncOutcome::SlotsBusy => Ok(BuildOutcome::SlotsBusy),
+        SyncOutcome::Ready(needed) => {
+            stream_files(&mut stream, &ctx.root_dir, needed)?;
+            wait_for_sync_ack(&mut stream)?;
+            send_build_request(&mut stream, ctx, cargo_args)?;
+            stream_build_output(&mut stream).map(BuildOutcome::Done)
+        }
+    }
+}
+
+fn open_connection(token: &str) -> CliResult<WsConn> {
     let addr: SocketAddr = format!("{}:{}", IP, PORT).parse().unwrap();
     let tcp =
         TcpStream::connect_timeout(&addr, Duration::from_secs(5)).map_err(CliError::connect)?;
     tcp.set_read_timeout(Some(Duration::from_secs(300)))?;
     tcp.set_write_timeout(Some(Duration::from_secs(30)))?;
+    tls::connect(tcp, token).map_err(CliError::connect)
+}
 
-    let mut stream: WsConn = tls::connect(tcp, &token).map_err(CliError::connect)?;
-
-    // Sync files first
-    sync_files(
-        &mut stream,
-        &ctx.root_dir,
-        &ctx.config.remote.team,
-        &ctx.config.remote.scope,
-    )?;
-
-    // Send build request
-    let host_platform = host_triple();
+fn send_build_request(
+    stream: &mut WsConn,
+    ctx: &WorkspaceContext,
+    cargo_args: &[String],
+) -> CliResult<()> {
     send_frame(
-        &mut stream,
+        stream,
         &Message::BuildRequest(BuildRequest {
-            cargo_args,
+            cargo_args: cargo_args.to_vec(),
             subdir: ctx.subdir.clone(),
-            host_platform,
+            host_platform: host_triple(),
             team: ctx.config.remote.team.clone(),
             scope: ctx.config.remote.scope.clone(),
         }),
-    )?;
+    )
+}
 
-    // Stream build output
+fn stream_build_output(stream: &mut WsConn) -> CliResult<ExitCode> {
     loop {
-        let msg = recv_frame(&mut stream)?;
-        match msg {
+        match recv_frame(stream)? {
             Message::BuildStdout(data) => {
                 io::stderr().write_all(b"[REMOTE] ")?;
                 io::stdout().write_all(&data)?;
@@ -265,9 +308,7 @@ fn try_remote(ctx: &WorkspaceContext, cargo_args: Vec<String>) -> CliResult<Exit
                 io::stderr().write_all(b"[REMOTE] ")?;
                 io::stderr().write_all(&data)?;
             }
-            Message::BuildFinished { exit_code } => {
-                return Ok(ExitCode::from(exit_code));
-            }
+            Message::BuildFinished { exit_code } => break Ok(ExitCode::from(exit_code)),
             _ => {}
         }
     }

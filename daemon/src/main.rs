@@ -1,6 +1,7 @@
 mod auth;
 mod constants;
 mod errors;
+mod slots;
 
 use abrasive_protocol::{BuildRequest, FileEntry, Manifest, Message, PlatformTriple};
 use rayon::prelude::*;
@@ -8,7 +9,6 @@ use rustls::ServerConnection;
 use rustls::StreamOwned;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use std::env;
 use std::fs;
 use std::io::{BufReader, Read};
 use std::net::{TcpListener, TcpStream};
@@ -25,6 +25,7 @@ use tungstenite::handshake::server::{ErrorResponse, Request, Response};
 use tungstenite::http;
 
 use crate::errors::{AuthError, DaemonError};
+use crate::slots::{SlotGuard, SlotTable};
 
 /// Commands that accept --target
 const TARGET_COMMANDS: &[&str] = &["build", "check", "test", "bench", "clippy", "doc"];
@@ -34,11 +35,13 @@ type WsConn = WebSocket<TlsStream>;
 
 fn main() {
     let tls_config = load_tls_config();
+    let slots = SlotTable::new();
     let listener = TcpListener::bind("0.0.0.0:8400").unwrap();
     println!("abrasived TEST listening on :8400 (TLS+WS)");
     for stream in listener.incoming().flatten() {
         let config = tls_config.clone();
-        thread::spawn(move || handle(stream, config));
+        let slots = slots.clone();
+        thread::spawn(move || handle(stream, config, slots));
     }
 }
 
@@ -58,10 +61,10 @@ fn load_tls_config() -> Arc<rustls::ServerConfig> {
     Arc::new(config)
 }
 
-fn handle(tcp_stream: TcpStream, tls_config: Arc<rustls::ServerConfig>) {
+fn handle(tcp_stream: TcpStream, tls_config: Arc<rustls::ServerConfig>, slots: SlotTable) {
     let peer = peer_addr(&tcp_stream);
     println!("[{peer}] connected");
-    if let Err(e) = serve(tcp_stream, tls_config, &peer) {
+    if let Err(e) = serve(tcp_stream, tls_config, &peer, &slots) {
         println!("[{peer}] {e}");
     }
 }
@@ -74,16 +77,38 @@ fn serve(
     tcp_stream: TcpStream,
     tls_config: Arc<rustls::ServerConfig>,
     peer: &str,
+    slots: &SlotTable,
 ) -> Result<(), DaemonError> {
     let tls_stream = tls_handshake(tcp_stream, tls_config)?;
-    let mut stream = ws_handshake(tls_stream, peer)?;
+    let (mut stream, login) = ws_handshake(tls_stream, peer)?;
     let manifest = expect_manifest(&mut stream)?;
     let files = manifest.decode_files()?;
-    let workspace = setup_workspace(&manifest.team, &manifest.scope, peer)?;
-    handle_sync(&mut stream, &workspace, peer, &files)?;
-    let req = expect_build_request(&mut stream)?;
-    let build_workspace = workspace_path(&req.team, &req.scope);
-    run_build(&mut stream, peer, &build_workspace, req);
+    let Some(slot) = slots.try_acquire(&manifest.team, &manifest.scope, &login) else {
+        return reject_busy(&mut stream, peer, &manifest);
+    };
+    serve_with_slot(&mut stream, slot, &manifest, &files, peer)
+}
+
+fn reject_busy(stream: &mut WsConn, peer: &str, manifest: &Manifest) -> Result<(), DaemonError> {
+    println!(
+        "[{peer}] all slots busy for {}/{}, rejecting",
+        manifest.team, manifest.scope
+    );
+    send_msg(stream, &Message::SlotsBusy)
+}
+
+fn serve_with_slot(
+    stream: &mut WsConn,
+    slot: SlotGuard,
+    manifest: &Manifest,
+    files: &[FileEntry],
+    peer: &str,
+) -> Result<(), DaemonError> {
+    println!("[{peer}] acquired slot {}", slot.index);
+    let workspace = setup_workspace(&slot, &manifest.team, &manifest.scope, peer)?;
+    handle_sync(stream, &workspace, peer, files)?;
+    let req = expect_build_request(stream)?;
+    run_build(stream, peer, &workspace, req);
     Ok(())
 }
 
@@ -95,7 +120,7 @@ fn tls_handshake(
     Ok(StreamOwned::new(conn, tcp))
 }
 
-fn ws_handshake(tls_stream: TlsStream, peer: &str) -> Result<WsConn, DaemonError> {
+fn ws_handshake(tls_stream: TlsStream, peer: &str) -> Result<(WsConn, String), DaemonError> {
     let auth_result: RefCell<Option<Result<String, AuthError>>> = RefCell::new(None);
     let ws_result = tungstenite::accept_hdr(tls_stream, |req: &Request, resp: Response| {
         authenticate(req, resp, &auth_result)
@@ -105,10 +130,12 @@ fn ws_handshake(tls_stream: TlsStream, peer: &str) -> Result<WsConn, DaemonError
         Err(HandshakeError::Failure(e)) => Err(DaemonError::WebSocket(e)),
         Err(HandshakeError::Interrupted(_)) => Err(DaemonError::WsHandshakeInterrupted),
     };
-    if let Some(login) = auth_result.into_inner().transpose()? {
-        println!("[{peer}] authenticated as github user '{login}'");
-    }
-    stream_or_err
+    let login = auth_result
+        .into_inner()
+        .transpose()?
+        .ok_or(AuthError::NoBearerToken)?;
+    println!("[{peer}] authenticated as github user '{login}'");
+    Ok((stream_or_err?, login))
 }
 
 fn authenticate(
@@ -179,16 +206,16 @@ fn send_msg(ws: &mut WsConn, msg: &Message) -> Result<(), DaemonError> {
     Ok(())
 }
 
-fn setup_workspace(team: &str, scope: &str, peer: &str) -> Result<PathBuf, DaemonError> {
-    let workspace = workspace_path(team, scope);
+fn setup_workspace(
+    slot: &SlotGuard,
+    team: &str,
+    scope: &str,
+    peer: &str,
+) -> Result<PathBuf, DaemonError> {
+    let workspace = slot.workspace(team, scope);
     fs::create_dir_all(&workspace)?;
-    ensure_target_on_tmpfs(&workspace, team, scope, peer);
+    ensure_target_on_tmpfs(&workspace, slot, team, scope, peer);
     Ok(workspace)
-}
-
-fn workspace_path(team: &str, scope: &str) -> PathBuf {
-    let home = env::var("HOME").unwrap_or_else(|_| "/root".to_string());
-    PathBuf::from(format!("{}/{}_{}", home, team, scope))
 }
 
 fn handle_sync(
@@ -296,8 +323,8 @@ fn hash_file(path: &Path) -> Option<[u8; 32]> {
 /// Make `<workspace>/target` live on tmpfs (/dev/shm) so cargo's
 /// write-heavy build artifacts skip the disk entirely. We do this with
 /// a symlink rather than a mount so we don't need root or namespacing.
-fn ensure_target_on_tmpfs(workspace: &Path, team: &str, scope: &str, peer: &str) {
-    let tmpfs_target = PathBuf::from(format!("/dev/shm/abrasive-targets/{}_{}", team, scope));
+fn ensure_target_on_tmpfs(workspace: &Path, slot: &SlotGuard, team: &str, scope: &str, peer: &str) {
+    let tmpfs_target = slot.tmpfs_target(team, scope);
     let target_link = workspace.join("target");
     if let Err(e) = fs::create_dir_all(&tmpfs_target) {
         println!("[{peer}] tmpfs target unavailable ({e}); falling back to disk");
