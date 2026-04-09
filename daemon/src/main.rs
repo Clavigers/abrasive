@@ -25,7 +25,7 @@ use tungstenite::handshake::server::{ErrorResponse, Request, Response};
 use tungstenite::http;
 
 use crate::errors::{AuthError, DaemonError};
-use crate::slots::{SlotGuard, SlotTable};
+use crate::slots::{FingerprintCache, SlotGuard, SlotTable};
 
 /// Commands that accept --target
 const TARGET_COMMANDS: &[&str] = &["build", "check", "test", "bench", "clippy", "doc"];
@@ -36,12 +36,14 @@ type WsConn = WebSocket<TlsStream>;
 fn main() {
     let tls_config = load_tls_config();
     let slots = SlotTable::new();
+    let fingerprints = FingerprintCache::new();
     let listener = TcpListener::bind("0.0.0.0:8400").unwrap();
     println!("abrasived TEST listening on :8400 (TLS+WS)");
     for stream in listener.incoming().flatten() {
         let config = tls_config.clone();
         let slots = slots.clone();
-        thread::spawn(move || handle(stream, config, slots));
+        let fingerprints = fingerprints.clone();
+        thread::spawn(move || handle(stream, config, slots, fingerprints));
     }
 }
 
@@ -61,10 +63,15 @@ fn load_tls_config() -> Arc<rustls::ServerConfig> {
     Arc::new(config)
 }
 
-fn handle(tcp_stream: TcpStream, tls_config: Arc<rustls::ServerConfig>, slots: SlotTable) {
+fn handle(
+    tcp_stream: TcpStream,
+    tls_config: Arc<rustls::ServerConfig>,
+    slots: SlotTable,
+    fingerprints: FingerprintCache,
+) {
     let peer = peer_addr(&tcp_stream);
     println!("[{peer}] connected");
-    if let Err(e) = serve(tcp_stream, tls_config, &peer, &slots) {
+    if let Err(e) = serve(tcp_stream, tls_config, &peer, &slots, &fingerprints) {
         println!("[{peer}] {e}");
     }
 }
@@ -78,38 +85,79 @@ fn serve(
     tls_config: Arc<rustls::ServerConfig>,
     peer: &str,
     slots: &SlotTable,
+    fingerprints: &FingerprintCache,
 ) -> Result<(), DaemonError> {
     let tls_stream = tls_handshake(tcp_stream, tls_config)?;
     let (mut stream, login) = ws_handshake(tls_stream, peer)?;
-    let manifest = expect_manifest(&mut stream)?;
-    let files = manifest.decode_files()?;
-    let Some(slot) = slots.try_acquire(&manifest.team, &manifest.scope, &login) else {
-        return reject_busy(&mut stream, peer, &manifest);
+    let probe = expect_probe(&mut stream)?;
+    let Some(slot) = slots.try_acquire(&probe.team, &probe.scope, &login) else {
+        return reject_busy(&mut stream, peer, &probe);
     };
-    serve_with_slot(&mut stream, slot, &manifest, &files, peer)
+    println!("[{peer}] acquired slot {}", slot.index);
+    let workspace = setup_workspace(&slot, &probe.team, &probe.scope, peer)?;
+    if fingerprints.matches(&slot, &probe.team, &probe.scope, &probe.fingerprint) {
+        fast_path(&mut stream, peer, &workspace)
+    } else {
+        slow_path(&mut stream, peer, &workspace, &slot, &probe, fingerprints)
+    }
 }
 
-fn reject_busy(stream: &mut WsConn, peer: &str, manifest: &Manifest) -> Result<(), DaemonError> {
+fn reject_busy(stream: &mut WsConn, peer: &str, probe: &ProbeInfo) -> Result<(), DaemonError> {
     println!(
         "[{peer}] all slots busy for {}/{}, rejecting",
-        manifest.team, manifest.scope
+        probe.team, probe.scope
     );
     send_msg(stream, &Message::SlotsBusy)
 }
 
-fn serve_with_slot(
-    stream: &mut WsConn,
-    slot: SlotGuard,
-    manifest: &Manifest,
-    files: &[FileEntry],
-    peer: &str,
-) -> Result<(), DaemonError> {
-    println!("[{peer}] acquired slot {}", slot.index);
-    let workspace = setup_workspace(&slot, &manifest.team, &manifest.scope, peer)?;
-    handle_sync(stream, &workspace, peer, files)?;
+fn fast_path(stream: &mut WsConn, peer: &str, workspace: &Path) -> Result<(), DaemonError> {
+    println!("[{peer}] fingerprint matches, skipping sync");
+    send_msg(stream, &Message::ProbeAccepted)?;
     let req = expect_build_request(stream)?;
-    run_build(stream, peer, &workspace, req);
+    run_build(stream, peer, workspace, req);
     Ok(())
+}
+
+fn slow_path(
+    stream: &mut WsConn,
+    peer: &str,
+    workspace: &Path,
+    slot: &SlotGuard,
+    probe: &ProbeInfo,
+    fingerprints: &FingerprintCache,
+) -> Result<(), DaemonError> {
+    send_msg(stream, &Message::ProbeMiss)?;
+    let manifest = expect_manifest(stream)?;
+    let files = manifest.decode_files()?;
+    handle_sync(stream, workspace, peer, &files)?;
+    fingerprints.insert(slot, &probe.team, &probe.scope, probe.fingerprint);
+    let req = expect_build_request(stream)?;
+    run_build(stream, peer, workspace, req);
+    Ok(())
+}
+
+struct ProbeInfo {
+    team: String,
+    scope: String,
+    fingerprint: [u8; 32],
+}
+
+fn expect_probe(stream: &mut WsConn) -> Result<ProbeInfo, DaemonError> {
+    match recv_msg(stream)? {
+        Message::Probe {
+            team,
+            scope,
+            fingerprint,
+        } => Ok(ProbeInfo {
+            team,
+            scope,
+            fingerprint,
+        }),
+        other => Err(DaemonError::UnexpectedMessage {
+            expected: "Probe",
+            got: format!("{other:?}"),
+        }),
+    }
 }
 
 fn tls_handshake(

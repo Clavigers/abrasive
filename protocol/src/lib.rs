@@ -19,6 +19,19 @@ pub enum Message {
     /// currently busy. The client should sleep and retry the whole
     /// connection. Sent in place of NeedFiles.
     SlotsBusy,
+    /// Cheap "is anything stale?" check sent before the full manifest.
+    /// The fingerprint is a hash of (path, mtime, size) for every
+    /// file in the workspace — no file contents read. The daemon
+    /// caches the last accepted fingerprint per (slot, team, scope)
+    /// in memory and answers ProbeAccepted (skip sync entirely) or
+    /// ProbeMiss (fall through to the Manifest flow).
+    Probe {
+        team: String,
+        scope: String,
+        fingerprint: [u8; 32],
+    },
+    ProbeAccepted,
+    ProbeMiss,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
