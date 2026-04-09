@@ -9,49 +9,45 @@
 
 use serde_json::Value;
 
-const REQUIRED_ORG: &str = "Clavigers";
-const USER_AGENT: &str = "abrasive-daemon";
+use crate::constants::{REQUIRED_ORG, USER_AGENT};
+use crate::errors::AuthError;
 
-pub fn validate(token: &str) -> Result<String, String> {
+const USER_URL: &str = "https://api.github.com/user";
+
+pub fn validate(token: &str) -> Result<String, AuthError> {
     let agent = ureq::agent();
+    let login = fetch_login(&agent, token)?;
+    check_membership(&agent, token, &login)?;
+    Ok(login)
+}
 
-    // 1. Identify the user.
-    let user_resp = agent
-        .get("https://api.github.com/user")
-        .set("Authorization", &format!("Bearer {token}"))
-        .set("Accept", "application/vnd.github+json")
-        .set("User-Agent", USER_AGENT)
-        .call()
-        .map_err(|e| format!("github /user call failed: {e}"))?;
-
-    let user_json: Value = user_resp
+fn fetch_login(agent: &ureq::Agent, token: &str) -> Result<String, AuthError> {
+    let json: Value = github_get(agent, token, USER_URL)
+        .map_err(AuthError::UserCall)?
         .into_json()
-        .map_err(|e| format!("parsing /user response: {e}"))?;
-
-    let login = user_json
-        .get("login")
+        .map_err(AuthError::UserResponseParse)?;
+    json.get("login")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| "no login in /user response".to_string())?
-        .to_string();
+        .map(String::from)
+        .ok_or(AuthError::NoLoginField)
+}
 
-    // 2. Check org membership. 204 = member; everything else (404, 302) =
-    //    not a member or token lacks read:org scope.
+fn check_membership(agent: &ureq::Agent, token: &str, login: &str) -> Result<(), AuthError> {
     let url = format!("https://api.github.com/orgs/{REQUIRED_ORG}/members/{login}");
-    match agent
-        .get(&url)
+    match github_get(agent, token, &url) {
+        Ok(_) => Ok(()),
+        Err(ureq::Error::Status(404, _)) => Err(AuthError::NotMember {
+            login: login.to_string(),
+        }),
+        Err(e) => Err(AuthError::MembershipCheck(e)),
+    }
+}
+
+fn github_get(agent: &ureq::Agent, token: &str, url: &str) -> Result<ureq::Response, ureq::Error> {
+    agent
+        .get(url)
         .set("Authorization", &format!("Bearer {token}"))
         .set("Accept", "application/vnd.github+json")
         .set("User-Agent", USER_AGENT)
         .call()
-    {
-        Ok(resp) if resp.status() == 204 => Ok(login),
-        Ok(resp) => Err(format!(
-            "user '{login}' not a member of {REQUIRED_ORG} (status {})",
-            resp.status()
-        )),
-        Err(ureq::Error::Status(_, _)) => Err(format!(
-            "user '{login}' not a member of {REQUIRED_ORG}"
-        )),
-        Err(e) => Err(format!("membership check failed: {e}")),
-    }
 }
