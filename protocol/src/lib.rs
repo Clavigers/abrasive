@@ -11,7 +11,6 @@ pub enum Message {
     FileData { path: String, contents: Vec<u8> },
     SyncDone,
     SyncAck,
-    BuildRequest(BuildRequest),
     BuildStdout(Vec<u8>),
     BuildStderr(Vec<u8>),
     BuildFinished { exit_code: u8 },
@@ -19,16 +18,20 @@ pub enum Message {
     /// currently busy. The client should sleep and retry the whole
     /// connection. Sent in place of NeedFiles.
     SlotsBusy,
-    /// Cheap "is anything stale?" check sent before the full manifest.
-    /// The fingerprint is a hash of (path, mtime, size) for every
-    /// file in the workspace — no file contents read. The daemon
-    /// caches the last accepted fingerprint per (slot, team, scope)
-    /// in memory and answers ProbeAccepted (skip sync entirely) or
-    /// ProbeMiss (fall through to the Manifest flow).
+    /// First message of every build attempt. Carries both a cheap
+    /// "is anything stale?" fingerprint and the full build request,
+    /// so the daemon can fast-path straight to cargo without waiting
+    /// for a separate BuildRequest message after the probe.
+    ///
+    /// Fingerprint is a hash of (path, mtime, size) for every file
+    /// in the workspace — no file contents read. The daemon caches
+    /// the last accepted fingerprint per (slot, team, scope) in
+    /// memory; on a hit it sends ProbeAccepted and starts cargo
+    /// immediately, on a miss it sends ProbeMiss and expects the
+    /// usual Manifest flow before running the embedded request.
     Probe {
-        team: String,
-        scope: String,
         fingerprint: [u8; 32],
+        request: BuildRequest,
     },
     ProbeAccepted,
     ProbeMiss,
@@ -44,7 +47,6 @@ impl Message {
             Message::FileData { .. } => "FileData",
             Message::SyncDone => "SyncDone",
             Message::SyncAck => "SyncAck",
-            Message::BuildRequest(_) => "BuildRequest",
             Message::BuildStdout(_) => "BuildStdout",
             Message::BuildStderr(_) => "BuildStderr",
             Message::BuildFinished { .. } => "BuildFinished",

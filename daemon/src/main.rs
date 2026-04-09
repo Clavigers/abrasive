@@ -90,31 +90,39 @@ fn serve(
     let tls_stream = tls_handshake(tcp_stream, tls_config)?;
     let (mut stream, login) = ws_handshake(tls_stream, peer)?;
     let probe = expect_probe(&mut stream)?;
-    let Some(slot) = slots.try_acquire(&probe.team, &probe.scope, &login) else {
-        return reject_busy(&mut stream, peer, &probe);
+    let team = probe.request.team.clone();
+    let scope = probe.request.scope.clone();
+    let Some(slot) = slots.try_acquire(&team, &scope, &login) else {
+        return reject_busy(&mut stream, peer, &team, &scope);
     };
     println!("[{peer}] acquired slot {}", slot.index);
-    let workspace = setup_workspace(&slot, &probe.team, &probe.scope, peer)?;
-    if fingerprints.matches(&slot, &probe.team, &probe.scope, &probe.fingerprint) {
-        fast_path(&mut stream, peer, &workspace)
+    let workspace = setup_workspace(&slot, &team, &scope, peer)?;
+    if fingerprints.matches(&slot, &team, &scope, &probe.fingerprint) {
+        fast_path(&mut stream, peer, &workspace, probe.request)
     } else {
-        slow_path(&mut stream, peer, &workspace, &slot, &probe, fingerprints)
+        slow_path(&mut stream, peer, &workspace, &slot, probe, fingerprints)
     }
 }
 
-fn reject_busy(stream: &mut WsConn, peer: &str, probe: &ProbeInfo) -> Result<(), DaemonError> {
-    println!(
-        "[{peer}] all slots busy for {}/{}, rejecting",
-        probe.team, probe.scope
-    );
+fn reject_busy(
+    stream: &mut WsConn,
+    peer: &str,
+    team: &str,
+    scope: &str,
+) -> Result<(), DaemonError> {
+    println!("[{peer}] all slots busy for {team}/{scope}, rejecting");
     send_msg(stream, &Message::SlotsBusy)
 }
 
-fn fast_path(stream: &mut WsConn, peer: &str, workspace: &Path) -> Result<(), DaemonError> {
+fn fast_path(
+    stream: &mut WsConn,
+    peer: &str,
+    workspace: &Path,
+    request: BuildRequest,
+) -> Result<(), DaemonError> {
     println!("[{peer}] fingerprint matches, skipping sync");
     send_msg(stream, &Message::ProbeAccepted)?;
-    let req = expect_build_request(stream)?;
-    run_build(stream, peer, workspace, req);
+    run_build(stream, peer, workspace, request);
     Ok(())
 }
 
@@ -123,36 +131,26 @@ fn slow_path(
     peer: &str,
     workspace: &Path,
     slot: &SlotGuard,
-    probe: &ProbeInfo,
+    probe: ProbeInfo,
     fingerprints: &FingerprintCache,
 ) -> Result<(), DaemonError> {
     send_msg(stream, &Message::ProbeMiss)?;
     let manifest = expect_manifest(stream)?;
     let files = manifest.decode_files()?;
     handle_sync(stream, workspace, peer, &files)?;
-    fingerprints.insert(slot, &probe.team, &probe.scope, probe.fingerprint);
-    let req = expect_build_request(stream)?;
-    run_build(stream, peer, workspace, req);
+    fingerprints.insert(slot, &probe.request.team, &probe.request.scope, probe.fingerprint);
+    run_build(stream, peer, workspace, probe.request);
     Ok(())
 }
 
 struct ProbeInfo {
-    team: String,
-    scope: String,
     fingerprint: [u8; 32],
+    request: BuildRequest,
 }
 
 fn expect_probe(stream: &mut WsConn) -> Result<ProbeInfo, DaemonError> {
     match recv_msg(stream)? {
-        Message::Probe {
-            team,
-            scope,
-            fingerprint,
-        } => Ok(ProbeInfo {
-            team,
-            scope,
-            fingerprint,
-        }),
+        Message::Probe { fingerprint, request } => Ok(ProbeInfo { fingerprint, request }),
         other => Err(DaemonError::UnexpectedMessage {
             expected: "Probe",
             got: other.kind().to_string(),
@@ -223,16 +221,6 @@ fn expect_manifest(stream: &mut WsConn) -> Result<Manifest, DaemonError> {
         Message::Manifest(m) => Ok(m),
         other => Err(DaemonError::UnexpectedMessage {
             expected: "Manifest",
-            got: other.kind().to_string(),
-        }),
-    }
-}
-
-fn expect_build_request(stream: &mut WsConn) -> Result<BuildRequest, DaemonError> {
-    match recv_msg(stream)? {
-        Message::BuildRequest(r) => Ok(r),
-        other => Err(DaemonError::UnexpectedMessage {
-            expected: "BuildRequest",
             got: other.kind().to_string(),
         }),
     }

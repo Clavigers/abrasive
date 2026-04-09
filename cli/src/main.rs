@@ -292,11 +292,10 @@ fn attempt_build(
     let mut stream = open_connection(token)?;
     let team = &ctx.config.remote.team;
     let scope = &ctx.config.remote.scope;
-    match send_probe(&mut stream, &ctx.root_dir, team, scope)? {
+    match send_probe(&mut stream, ctx, cargo_args)? {
         ProbeResult::SlotsBusy => Ok(BuildOutcome::SlotsBusy),
         ProbeResult::Accepted => {
             eprintln!("[sync] fingerprint matched, skipping manifest");
-            send_build_request(&mut stream, ctx, cargo_args)?;
             stream_build_output(&mut stream).map(BuildOutcome::Done)
         }
         ProbeResult::Miss => match start_sync(&mut stream, &ctx.root_dir, team, scope)? {
@@ -304,7 +303,6 @@ fn attempt_build(
             SyncOutcome::Ready(needed) => {
                 stream_files(&mut stream, &ctx.root_dir, needed)?;
                 wait_for_sync_ack(&mut stream)?;
-                send_build_request(&mut stream, ctx, cargo_args)?;
                 stream_build_output(&mut stream).map(BuildOutcome::Done)
             }
         },
@@ -319,17 +317,22 @@ enum ProbeResult {
 
 fn send_probe(
     stream: &mut WsConn,
-    root: &Path,
-    team: &str,
-    scope: &str,
+    ctx: &WorkspaceContext,
+    cargo_args: &[String],
 ) -> CliResult<ProbeResult> {
-    let fp = fingerprint(root);
+    let fp = fingerprint(&ctx.root_dir);
+    let request = BuildRequest {
+        cargo_args: cargo_args.to_vec(),
+        subdir: ctx.subdir.clone(),
+        host_platform: host_triple(),
+        team: ctx.config.remote.team.clone(),
+        scope: ctx.config.remote.scope.clone(),
+    };
     send_frame(
         stream,
         &Message::Probe {
-            team: team.to_string(),
-            scope: scope.to_string(),
             fingerprint: fp,
+            request,
         },
     )?;
     match recv_frame(stream)? {
@@ -350,23 +353,6 @@ fn open_connection(token: &str) -> CliResult<WsConn> {
     tcp.set_read_timeout(Some(Duration::from_secs(300)))?;
     tcp.set_write_timeout(Some(Duration::from_secs(30)))?;
     tls::connect(tcp, token).map_err(CliError::connect)
-}
-
-fn send_build_request(
-    stream: &mut WsConn,
-    ctx: &WorkspaceContext,
-    cargo_args: &[String],
-) -> CliResult<()> {
-    send_frame(
-        stream,
-        &Message::BuildRequest(BuildRequest {
-            cargo_args: cargo_args.to_vec(),
-            subdir: ctx.subdir.clone(),
-            host_platform: host_triple(),
-            team: ctx.config.remote.team.clone(),
-            scope: ctx.config.remote.scope.clone(),
-        }),
-    )
 }
 
 fn stream_build_output(stream: &mut WsConn) -> CliResult<ExitCode> {
