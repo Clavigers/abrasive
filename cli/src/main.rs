@@ -1,17 +1,17 @@
-mod auth;
-mod errors;
-mod platform;
-mod tls;
-
+use abrasive_cli::agent;
+use abrasive_cli::auth;
+use abrasive_cli::errors::{self, CliError, CliResult};
+use abrasive_cli::platform::host_triple;
+use abrasive_cli::tls;
 use abrasive_protocol::{BuildRequest, FileEntry, Manifest, Message};
 use clap::builder::styling::{AnsiColor, Styles};
 use clap::{CommandFactory, Parser, Subcommand};
-use errors::{CliError, CliResult};
 use ignore::WalkBuilder;
 use rayon::prelude::*;
 use serde::Deserialize;
 use std::io::{self, Write};
 use std::net::{SocketAddr, TcpStream};
+use std::os::unix::net::UnixStream;
 use std::sync::mpsc::sync_channel;
 use std::thread;
 use std::time::Duration;
@@ -20,10 +20,6 @@ use std::{
     path::{Path, PathBuf},
     process::{Command as Cmd, ExitCode},
 };
-use tls::WsConn;
-use tungstenite::Message as WsMessage;
-
-use crate::platform::host_triple;
 
 const IP: &str = "157.180.55.180";
 const PORT: u16 = 8400;
@@ -161,29 +157,50 @@ fn stat_entry(p: &Path, root: &Path) -> Option<(String, u64, u64)> {
     Some((rel, mtime, meta.len()))
 }
 
-fn ws_err(e: tungstenite::Error) -> CliError {
-    match e {
-        tungstenite::Error::Io(io) => io.into(),
-        _ => CliError::disconnected(),
+enum Conn {
+    Ws(tls::WsConn),
+    Agent(UnixStream),
+}
+
+impl Conn {
+    fn send_raw(&mut self, data: Vec<u8>) -> io::Result<()> {
+        match self {
+            Conn::Ws(ws) => ws.send(tungstenite::Message::Binary(data)).map_err(ws_to_io),
+            Conn::Agent(s) => agent::write_msg(s, &data),
+        }
+    }
+
+    fn recv_raw(&mut self) -> io::Result<Vec<u8>> {
+        match self {
+            Conn::Ws(ws) => loop {
+                match ws.read().map_err(ws_to_io)? {
+                    tungstenite::Message::Binary(data) => break Ok(data),
+                    tungstenite::Message::Close(_) => {
+                        break Err(io::Error::new(io::ErrorKind::ConnectionReset, "closed"))
+                    }
+                    _ => continue,
+                }
+            },
+            Conn::Agent(s) => agent::read_msg(s),
+        }
     }
 }
 
-fn send_frame(ws: &mut WsConn, msg: &Message) -> CliResult<()> {
-    let payload = abrasive_protocol::serialize(msg);
-    ws.send(WsMessage::Binary(payload)).map_err(ws_err)?;
+fn ws_to_io(e: tungstenite::Error) -> io::Error {
+    match e {
+        tungstenite::Error::Io(io) => io,
+        other => io::Error::new(io::ErrorKind::Other, other.to_string()),
+    }
+}
+
+fn send_frame(conn: &mut Conn, msg: &Message) -> CliResult<()> {
+    conn.send_raw(abrasive_protocol::serialize(msg))?;
     Ok(())
 }
 
-fn recv_frame(ws: &mut WsConn) -> CliResult<Message> {
-    loop {
-        match ws.read().map_err(ws_err)? {
-            WsMessage::Binary(data) => return Ok(abrasive_protocol::deserialize(&data)?),
-            WsMessage::Ping(_) | WsMessage::Pong(_) => continue,
-            WsMessage::Close(_) => return Err(CliError::disconnected()),
-            // We never send text frames; ignore stray ones from libraries.
-            WsMessage::Text(_) | WsMessage::Frame(_) => continue,
-        }
-    }
+fn recv_frame(conn: &mut Conn) -> CliResult<Message> {
+    let data = conn.recv_raw()?;
+    Ok(abrasive_protocol::deserialize(&data)?)
 }
 
 enum SyncOutcome {
@@ -192,7 +209,7 @@ enum SyncOutcome {
 }
 
 fn start_sync(
-    stream: &mut WsConn,
+    stream: &mut Conn,
     root: &Path,
     team: &str,
     scope: &str,
@@ -225,7 +242,7 @@ fn build_and_log_manifest(root: &Path, team: &str, scope: &str) -> Manifest {
     }
 }
 
-fn stream_files(stream: &mut WsConn, root: &Path, needed: Vec<String>) -> CliResult<()> {
+fn stream_files(stream: &mut Conn, root: &Path, needed: Vec<String>) -> CliResult<()> {
     eprintln!("[sync] sending {} files", needed.len());
     let (tx, rx) = sync_channel::<(String, Vec<u8>)>(32);
     let root_buf = root.to_path_buf();
@@ -243,7 +260,7 @@ fn stream_files(stream: &mut WsConn, root: &Path, needed: Vec<String>) -> CliRes
     send_frame(stream, &Message::SyncDone)
 }
 
-fn wait_for_sync_ack(stream: &mut WsConn) -> CliResult<()> {
+fn wait_for_sync_ack(stream: &mut Conn) -> CliResult<()> {
     match recv_frame(stream)? {
         Message::SyncAck => {
             eprintln!("[sync] done");
@@ -316,7 +333,7 @@ enum ProbeResult {
 }
 
 fn send_probe(
-    stream: &mut WsConn,
+    stream: &mut Conn,
     ctx: &WorkspaceContext,
     cargo_args: &[String],
 ) -> CliResult<ProbeResult> {
@@ -346,16 +363,20 @@ fn send_probe(
     }
 }
 
-fn open_connection(token: &str) -> CliResult<WsConn> {
+fn open_connection(token: &str) -> CliResult<Conn> {
+    if let Ok(stream) = UnixStream::connect(agent::socket_path()) {
+        eprintln!("[net] connected via agent");
+        return Ok(Conn::Agent(stream));
+    }
     let addr: SocketAddr = format!("{}:{}", IP, PORT).parse().unwrap();
     let tcp =
         TcpStream::connect_timeout(&addr, Duration::from_secs(5)).map_err(CliError::connect)?;
     tcp.set_read_timeout(Some(Duration::from_secs(300)))?;
     tcp.set_write_timeout(Some(Duration::from_secs(30)))?;
-    tls::connect(tcp, token).map_err(CliError::connect)
+    Ok(Conn::Ws(tls::connect(tcp, token).map_err(CliError::connect)?))
 }
 
-fn stream_build_output(stream: &mut WsConn) -> CliResult<ExitCode> {
+fn stream_build_output(stream: &mut Conn) -> CliResult<ExitCode> {
     loop {
         match recv_frame(stream)? {
             Message::BuildStdout(data) => {
