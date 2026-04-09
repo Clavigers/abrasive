@@ -14,7 +14,7 @@ use std::io::{self, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::sync::mpsc::sync_channel;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::{
     env, fs,
     path::{Path, PathBuf},
@@ -289,7 +289,9 @@ fn attempt_build(
     cargo_args: &[String],
     token: &str,
 ) -> CliResult<BuildOutcome> {
+    let connect_start = Instant::now();
     let mut stream = open_connection(token)?;
+    eprintln!("[net] connection opened in {:.2?}", connect_start.elapsed());
     let team = &ctx.config.remote.team;
     let scope = &ctx.config.remote.scope;
     match send_probe(&mut stream, ctx, cargo_args)? {
@@ -328,6 +330,7 @@ fn send_probe(
         team: ctx.config.remote.team.clone(),
         scope: ctx.config.remote.scope.clone(),
     };
+    let probe_start = Instant::now();
     send_frame(
         stream,
         &Message::Probe {
@@ -335,7 +338,9 @@ fn send_probe(
             request,
         },
     )?;
-    match recv_frame(stream)? {
+    let result = recv_frame(stream)?;
+    eprintln!("[net] probe rtt {:.2?}", probe_start.elapsed());
+    match result {
         Message::ProbeAccepted => Ok(ProbeResult::Accepted),
         Message::ProbeMiss => Ok(ProbeResult::Miss),
         Message::SlotsBusy => Ok(ProbeResult::SlotsBusy),
