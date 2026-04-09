@@ -106,18 +106,7 @@ fn login() -> CliResult<()> {
 }
 
 fn build_manifest(root: &Path) -> Vec<FileEntry> {
-    // 1. Walk (single-threaded; ignore's parallel walker is awkward to collect from)
-    let paths: Vec<PathBuf> = WalkBuilder::new(root)
-        .git_ignore(true)
-        .git_exclude(true)
-        .filter_entry(|e| e.file_name() != ".git")
-        .build()
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().map_or(false, |ft| ft.is_file()))
-        .map(|e| e.into_path())
-        .collect();
-
-    // 2. Hash in parallel
+    let paths = walk_files(root);
     paths
         .par_iter()
         .filter_map(|p| {
@@ -127,6 +116,49 @@ fn build_manifest(root: &Path) -> Vec<FileEntry> {
             Some(FileEntry { path: rel, hash })
         })
         .collect()
+}
+
+fn walk_files(root: &Path) -> Vec<PathBuf> {
+    WalkBuilder::new(root)
+        .git_ignore(true)
+        .git_exclude(true)
+        .filter_entry(|e| e.file_name() != ".git")
+        .build()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().map_or(false, |ft| ft.is_file()))
+        .map(|e| e.into_path())
+        .collect()
+}
+
+/// Cheap "did anything change?" probe sent before the full manifest.
+/// Hashes (relative path, mtime, size) for every file — no file
+/// contents read. Daemon caches the last accepted fingerprint per slot
+/// and short-circuits the manifest+sync flow on a match.
+fn fingerprint(root: &Path) -> [u8; 32] {
+    let mut entries: Vec<(String, u64, u64)> = walk_files(root)
+        .into_iter()
+        .filter_map(|p| stat_entry(&p, root))
+        .collect();
+    entries.sort();
+    let mut hasher = blake3::Hasher::new();
+    for (path, mtime, size) in entries {
+        hasher.update(path.as_bytes());
+        hasher.update(&mtime.to_le_bytes());
+        hasher.update(&size.to_le_bytes());
+    }
+    *hasher.finalize().as_bytes()
+}
+
+fn stat_entry(p: &Path, root: &Path) -> Option<(String, u64, u64)> {
+    let rel = p.strip_prefix(root).ok()?.to_string_lossy().to_string();
+    let meta = fs::metadata(p).ok()?;
+    let mtime = meta
+        .modified()
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()?
+        .as_secs();
+    Some((rel, mtime, meta.len()))
 }
 
 fn ws_err(e: tungstenite::Error) -> CliError {
@@ -260,13 +292,56 @@ fn attempt_build(
     let mut stream = open_connection(token)?;
     let team = &ctx.config.remote.team;
     let scope = &ctx.config.remote.scope;
-    match start_sync(&mut stream, &ctx.root_dir, team, scope)? {
-        SyncOutcome::SlotsBusy => Ok(BuildOutcome::SlotsBusy),
-        SyncOutcome::Ready(needed) => {
-            stream_files(&mut stream, &ctx.root_dir, needed)?;
-            wait_for_sync_ack(&mut stream)?;
-            send_build_request(&mut stream, ctx, cargo_args)?;
+    match send_probe(&mut stream, ctx, cargo_args)? {
+        ProbeResult::SlotsBusy => Ok(BuildOutcome::SlotsBusy),
+        ProbeResult::Accepted => {
+            eprintln!("[sync] fingerprint matched, skipping manifest");
             stream_build_output(&mut stream).map(BuildOutcome::Done)
+        }
+        ProbeResult::Miss => match start_sync(&mut stream, &ctx.root_dir, team, scope)? {
+            SyncOutcome::SlotsBusy => Ok(BuildOutcome::SlotsBusy),
+            SyncOutcome::Ready(needed) => {
+                stream_files(&mut stream, &ctx.root_dir, needed)?;
+                wait_for_sync_ack(&mut stream)?;
+                stream_build_output(&mut stream).map(BuildOutcome::Done)
+            }
+        },
+    }
+}
+
+enum ProbeResult {
+    Accepted,
+    Miss,
+    SlotsBusy,
+}
+
+fn send_probe(
+    stream: &mut WsConn,
+    ctx: &WorkspaceContext,
+    cargo_args: &[String],
+) -> CliResult<ProbeResult> {
+    let fp = fingerprint(&ctx.root_dir);
+    let request = BuildRequest {
+        cargo_args: cargo_args.to_vec(),
+        subdir: ctx.subdir.clone(),
+        host_platform: host_triple(),
+        team: ctx.config.remote.team.clone(),
+        scope: ctx.config.remote.scope.clone(),
+    };
+    send_frame(
+        stream,
+        &Message::Probe {
+            fingerprint: fp,
+            request,
+        },
+    )?;
+    match recv_frame(stream)? {
+        Message::ProbeAccepted => Ok(ProbeResult::Accepted),
+        Message::ProbeMiss => Ok(ProbeResult::Miss),
+        Message::SlotsBusy => Ok(ProbeResult::SlotsBusy),
+        other => {
+            eprintln!("[sync] unexpected probe response: {other:?}");
+            Err(CliError::disconnected())
         }
     }
 }
@@ -278,23 +353,6 @@ fn open_connection(token: &str) -> CliResult<WsConn> {
     tcp.set_read_timeout(Some(Duration::from_secs(300)))?;
     tcp.set_write_timeout(Some(Duration::from_secs(30)))?;
     tls::connect(tcp, token).map_err(CliError::connect)
-}
-
-fn send_build_request(
-    stream: &mut WsConn,
-    ctx: &WorkspaceContext,
-    cargo_args: &[String],
-) -> CliResult<()> {
-    send_frame(
-        stream,
-        &Message::BuildRequest(BuildRequest {
-            cargo_args: cargo_args.to_vec(),
-            subdir: ctx.subdir.clone(),
-            host_platform: host_triple(),
-            team: ctx.config.remote.team.clone(),
-            scope: ctx.config.remote.scope.clone(),
-        }),
-    )
 }
 
 fn stream_build_output(stream: &mut WsConn) -> CliResult<ExitCode> {

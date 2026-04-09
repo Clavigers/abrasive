@@ -16,6 +16,34 @@ use std::sync::{Arc, Mutex};
 
 use crate::constants::SLOTS_PER_SCOPE;
 
+/// Per-slot cache of "the last fingerprint we successfully synced
+/// from a client into this slot." On the next connection from any
+/// client, if their probe fingerprint matches the cached value the
+/// daemon knows the slot's source tree is already up to date and
+/// can skip the manifest/sync phase entirely.
+#[derive(Clone, Default)]
+pub struct FingerprintCache {
+    inner: Arc<Mutex<HashMap<FpKey, [u8; 32]>>>,
+}
+
+type FpKey = (usize, String, String);
+
+impl FingerprintCache {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn matches(&self, slot: &SlotGuard, team: &str, scope: &str, fp: &[u8; 32]) -> bool {
+        let key = (slot.index, team.to_string(), scope.to_string());
+        self.inner.lock().unwrap().get(&key) == Some(fp)
+    }
+
+    pub fn insert(&self, slot: &SlotGuard, team: &str, scope: &str, fp: [u8; 32]) {
+        let key = (slot.index, team.to_string(), scope.to_string());
+        self.inner.lock().unwrap().insert(key, fp);
+    }
+}
+
 type Key = (String, String);
 type SlotArray = [bool; SLOTS_PER_SCOPE];
 
