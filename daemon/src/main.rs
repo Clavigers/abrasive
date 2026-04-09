@@ -71,8 +71,9 @@ fn handle(
 ) {
     let peer = peer_addr(&tcp_stream);
     println!("[{peer}] connected");
-    if let Err(e) = serve(tcp_stream, tls_config, &peer, &slots, &fingerprints) {
-        println!("[{peer}] {e}");
+    match serve(tcp_stream, tls_config, &peer, &slots, &fingerprints) {
+        Ok(()) | Err(DaemonError::ClientClosed) => println!("[{peer}] disconnected"),
+        Err(e) => println!("[{peer}] {e}"),
     }
 }
 
@@ -89,18 +90,36 @@ fn serve(
 ) -> Result<(), DaemonError> {
     let tls_stream = tls_handshake(tcp_stream, tls_config)?;
     let (mut stream, login) = ws_handshake(tls_stream, peer)?;
-    let probe = expect_probe(&mut stream)?;
+    loop {
+        match serve_one_build(&mut stream, peer, &login, slots, fingerprints) {
+            Ok(()) => continue,
+            Err(DaemonError::ClientClosed) => break Ok(()),
+            Err(DaemonError::WebSocket(tungstenite::Error::Io(ref e)))
+                if e.kind() == std::io::ErrorKind::UnexpectedEof => break Ok(()),
+            Err(e) => break Err(e),
+        }
+    }
+}
+
+fn serve_one_build(
+    stream: &mut WsConn,
+    peer: &str,
+    login: &str,
+    slots: &SlotTable,
+    fingerprints: &FingerprintCache,
+) -> Result<(), DaemonError> {
+    let probe = expect_probe(stream)?;
     let team = probe.request.team.clone();
     let scope = probe.request.scope.clone();
-    let Some(slot) = slots.try_acquire(&team, &scope, &login) else {
-        return reject_busy(&mut stream, peer, &team, &scope);
+    let Some(slot) = slots.try_acquire(&team, &scope, login) else {
+        return reject_busy(stream, peer, &team, &scope);
     };
     println!("[{peer}] acquired slot {}", slot.index);
     let workspace = setup_workspace(&slot, &team, &scope, peer)?;
     if fingerprints.matches(&slot, &team, &scope, &probe.fingerprint) {
-        fast_path(&mut stream, peer, &workspace, probe.request)
+        fast_path(stream, peer, &workspace, probe.request)
     } else {
-        slow_path(&mut stream, peer, &workspace, &slot, probe, fingerprints)
+        slow_path(stream, peer, &workspace, &slot, probe, fingerprints)
     }
 }
 
@@ -468,7 +487,6 @@ fn forward_build_output(stream: &mut WsConn, mut child: Child, peer: &str) {
     }
     let exit_code = child.wait().map(|s| s.code().unwrap_or(1) as u8).unwrap_or(1);
     let _ = send_msg(stream, &Message::BuildFinished { exit_code });
-    let _ = stream.close(None);
     println!("[{peer}] done");
 }
 
