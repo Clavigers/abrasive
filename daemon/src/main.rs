@@ -71,8 +71,9 @@ fn handle(
 ) {
     let peer = peer_addr(&tcp_stream);
     println!("[{peer}] connected");
-    if let Err(e) = serve(tcp_stream, tls_config, &peer, &slots, &fingerprints) {
-        println!("[{peer}] {e}");
+    match serve(tcp_stream, tls_config, &peer, &slots, &fingerprints) {
+        Ok(()) | Err(DaemonError::ClientClosed) => println!("[{peer}] disconnected"),
+        Err(e) => println!("[{peer}] {e}"),
     }
 }
 
@@ -93,6 +94,8 @@ fn serve(
         match serve_one_build(&mut stream, peer, &login, slots, fingerprints) {
             Ok(()) => continue,
             Err(DaemonError::ClientClosed) => break Ok(()),
+            Err(DaemonError::WebSocket(tungstenite::Error::Io(ref e)))
+                if e.kind() == std::io::ErrorKind::UnexpectedEof => break Ok(()),
             Err(e) => break Err(e),
         }
     }
