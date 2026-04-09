@@ -17,9 +17,18 @@ fn main() {
     });
     let path = agent::socket_path();
     let _ = fs::remove_file(&path);
+    let mut ws: Option<tls::WsConn> = match connect(&token) {
+        Ok(conn) => {
+            eprintln!("[agent] connected to daemon");
+            Some(conn)
+        }
+        Err(e) => {
+            eprintln!("[agent] initial connection failed: {e}");
+            None
+        }
+    };
     let listener = UnixListener::bind(&path).expect("failed to bind agent socket");
     eprintln!("[agent] listening on {}", path.display());
-    let mut ws: Option<tls::WsConn> = None;
     for client in listener.incoming().flatten() {
         if let Err(e) = handle(client, &token, &mut ws) {
             eprintln!("[agent] session error: {e}");

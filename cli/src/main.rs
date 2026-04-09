@@ -18,12 +18,12 @@ use std::time::Duration;
 use std::{
     env, fs,
     path::{Path, PathBuf},
-    process::{Command as Cmd, ExitCode},
+    process::{Command as Cmd, ExitCode, Stdio},
 };
 
 const IP: &str = "157.180.55.180";
 const PORT: u16 = 8400;
-const REMOTE_COMMANDS: &[&str] = &["build", "run", "test", "bench", "check", "clippy", "doc"];
+const REMOTE_COMMANDS: &[&str] = &["build", "run", "test", "bench", "check", "clippy", "doc", "clean"];
 
 const STYLES: Styles = Styles::styled()
     .header(AnsiColor::Yellow.on_default().bold())
@@ -365,7 +365,6 @@ fn send_probe(
 
 fn open_connection(token: &str) -> CliResult<Conn> {
     if let Ok(stream) = UnixStream::connect(agent::socket_path()) {
-        eprintln!("[net] connected via agent");
         return Ok(Conn::Agent(stream));
     }
     let addr: SocketAddr = format!("{}:{}", IP, PORT).parse().unwrap();
@@ -374,6 +373,24 @@ fn open_connection(token: &str) -> CliResult<Conn> {
     tcp.set_read_timeout(Some(Duration::from_secs(300)))?;
     tcp.set_write_timeout(Some(Duration::from_secs(30)))?;
     Ok(Conn::Ws(tls::connect(tcp, token).map_err(CliError::connect)?))
+}
+
+fn spawn_agent_for_next_time() {
+    if agent::socket_path().exists() {
+        return;
+    }
+    let Some(agent_bin) = env::var_os("ABRASIVE_AGENT_BIN") else {
+        return;
+    };
+    let Ok(child) = Cmd::new(agent_bin)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    else {
+        return;
+    };
+    std::mem::forget(child);
 }
 
 fn stream_build_output(stream: &mut Conn) -> CliResult<ExitCode> {
@@ -499,6 +516,7 @@ fn should_go_remote(args: &[String]) -> bool {
 fn run() -> CliResult<ExitCode> {
     // First, Check if we are in an abrasive workspace
     // if not forward args to local cargo
+    spawn_agent_for_next_time();
     let ctx = match get_workspace()? {
         None => return forward_args_to_local(),
         Some(ctx) => ctx,

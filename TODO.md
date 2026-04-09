@@ -56,4 +56,4 @@
 
 ## ASAP
 
-make multiple clones per scope (slots) M=4 add queue and fingerprint
+okay so I also added the agent so ws connection overhead can be lower. I guess at some point I should start that thing up... right now I am doing it manually 
