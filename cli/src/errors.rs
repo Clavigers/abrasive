@@ -34,6 +34,9 @@ pub enum CliErrorKind {
 
     #[error("cargo not found: {0}")]
     CargoNotFound(std::io::Error),
+
+    #[error("authentication failed: {0}")]
+    Auth(String),
 }
 
 pub type CliResult<T> = Result<T, CliError>;
@@ -70,6 +73,13 @@ impl CliError {
     pub fn no_cwd(e: std::io::Error) -> Self {
         Self {
             kind: CliErrorKind::NoCwd(e),
+            exit_code: ExitCode::FAILURE,
+        }
+    }
+
+    pub fn auth(msg: String) -> Self {
+        Self {
+            kind: CliErrorKind::Auth(msg),
             exit_code: ExitCode::FAILURE,
         }
     }

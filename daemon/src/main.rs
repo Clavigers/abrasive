@@ -1,3 +1,5 @@
+mod auth;
+
 use abrasive_protocol::{BuildRequest, Manifest, Message, PlatformTriple};
 use std::env;
 use rustls::ServerConnection;
@@ -152,7 +154,7 @@ fn handle_sync(
     Ok(())
 }
 
-fn handle(tcp_stream: TcpStream, tls_config: Arc<rustls::ServerConfig>, expected_token: Arc<String>) {
+fn handle(tcp_stream: TcpStream, tls_config: Arc<rustls::ServerConfig>) {
     let peer = tcp_stream
         .peer_addr()
         .map(|a| a.to_string())
@@ -168,29 +170,49 @@ fn handle(tcp_stream: TcpStream, tls_config: Arc<rustls::ServerConfig>, expected
     };
     let tls_stream = StreamOwned::new(tls_conn, tcp_stream);
 
-    // WebSocket upgrade with bearer token validation. Reject early with
-    // 401 before doing any protocol work.
-    let expected_header = format!("Bearer {expected_token}");
+    // WebSocket upgrade with GitHub token validation. We pull the bearer
+    // token out of the Authorization header, then in the handshake
+    // callback we call GitHub's API to confirm (a) the token is valid
+    // and (b) the user is a member of the required org. Reject with 401
+    // before doing any protocol work.
+    let github_login: std::cell::RefCell<Option<String>> = std::cell::RefCell::new(None);
     let auth_ok = std::cell::Cell::new(false);
     let ws_result = tungstenite::accept_hdr(tls_stream, |req: &Request, resp: Response| {
         let presented = req
             .headers()
             .get("Authorization")
-            .and_then(|v| v.to_str().ok());
-        if presented == Some(expected_header.as_str()) {
-            auth_ok.set(true);
-            Ok(resp)
-        } else {
-            let mut err: ErrorResponse = http::Response::new(Some("invalid token".to_string()));
-            *err.status_mut() = http::StatusCode::UNAUTHORIZED;
-            Err(err)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("Bearer "));
+
+        let token = match presented {
+            Some(t) if !t.is_empty() => t,
+            _ => {
+                let mut err: ErrorResponse =
+                    http::Response::new(Some("missing bearer token".to_string()));
+                *err.status_mut() = http::StatusCode::UNAUTHORIZED;
+                return Err(err);
+            }
+        };
+
+        match auth::validate(token) {
+            Ok(login) => {
+                *github_login.borrow_mut() = Some(login);
+                auth_ok.set(true);
+                Ok(resp)
+            }
+            Err(reason) => {
+                println!("[{peer}] auth rejected: {reason}");
+                let mut err: ErrorResponse = http::Response::new(Some(reason));
+                *err.status_mut() = http::StatusCode::UNAUTHORIZED;
+                Err(err)
+            }
         }
     });
     let mut stream: WsConn = match ws_result {
         Ok(ws) => ws,
         Err(HandshakeError::Failure(e)) => {
             if !auth_ok.get() {
-                println!("[{peer}] rejected: bad/missing bearer token");
+                println!("[{peer}] rejected: bad/missing/unauthorized github token");
             } else {
                 println!("[{peer}] ws handshake failed: {e}");
             }
@@ -201,6 +223,10 @@ fn handle(tcp_stream: TcpStream, tls_config: Arc<rustls::ServerConfig>, expected
             return;
         }
     };
+
+    if let Some(login) = github_login.into_inner() {
+        println!("[{peer}] authenticated as github user '{login}'");
+    }
 
     let manifest = match recv_msg(&mut stream) {
         Ok(Message::Manifest(m)) => m,
@@ -431,16 +457,10 @@ fn amend_args_with_platform(mut args: Vec<String>, platform: PlatformTriple) -> 
 
 fn main() {
     let tls_config = load_tls_config();
-    // TEMPORARY: shared bearer token via env var until GitHub OAuth lands.
-    let expected_token = Arc::new(
-        env::var("ABRASIVE_TOKEN")
-            .expect("ABRASIVE_TOKEN env var must be set"),
-    );
     let listener = TcpListener::bind("0.0.0.0:8400").unwrap();
     println!("abrasived TEST listening on :8400 (TLS+WS)");
     for stream in listener.incoming().flatten() {
         let config = tls_config.clone();
-        let token = expected_token.clone();
-        thread::spawn(move || handle(stream, config, token));
+        thread::spawn(move || handle(stream, config));
     }
 }

@@ -1,3 +1,4 @@
+mod auth;
 mod errors;
 mod platform;
 mod tls;
@@ -94,11 +95,9 @@ fn remote_setup() {
     todo!("remote_setup")
 }
 
-fn login() {
-    // open a browser authenticate with github. create a credentials folder
-    // on this machine that has the username and api key of the user, future
-    // protocol commands will maybe use
-    todo!("login")
+fn login() -> CliResult<()> {
+    auth::login()?;
+    Ok(())
 }
 
 fn build_manifest(root: &Path) -> Vec<FileEntry> {
@@ -219,8 +218,7 @@ fn try_remote(ctx: &WorkspaceContext, cargo_args: Vec<String>) -> CliResult<Exit
         return forward_args_to_local();
     }
 
-    // TEMPORARY: bearer token via env var until the GitHub OAuth flow lands.
-    let token = env::var("ABRASIVE_TOKEN").unwrap_or_default();
+    let token = auth::token()?;
 
     let addr: SocketAddr = format!("{}:{}", IP, PORT).parse().unwrap();
     let tcp =
@@ -386,7 +384,7 @@ fn run() -> CliResult<ExitCode> {
     let cli = Cli::parse();
     match cli.command {
         Some(Command::Setup) => remote_setup(),
-        Some(Command::Auth) => login(),
+        Some(Command::Auth) => login()?,
         Some(Command::Version) => print_version(),
         Some(Command::Help) => print_help(),
         Some(Command::Workspace) => print_workspace()?,
