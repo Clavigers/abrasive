@@ -422,6 +422,11 @@ fn create_target_symlink(target_link: &Path, tmpfs_target: &Path, peer: &str) {
 fn create_target_symlink(_target_link: &Path, _tmpfs_target: &Path, _peer: &str) {}
 
 fn run_build(stream: &mut WsConn, peer: &str, workspace: &Path, req: BuildRequest) {
+    if req.cargo_args.first().map_or(false, |c| c == "nop") {
+        println!("[{peer}] nop (sync only)");
+        let _ = send_msg(stream, &Message::BuildFinished { exit_code: 0 });
+        return;
+    }
     let cargo_args = build_cargo_args(req.cargo_args, req.host_platform);
     let cd_target = build_dir(workspace, req.subdir.as_deref());
     println!(
