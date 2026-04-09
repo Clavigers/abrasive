@@ -34,6 +34,45 @@ pub enum CliErrorKind {
 
     #[error("cargo not found: {0}")]
     CargoNotFound(std::io::Error),
+
+    #[error("authentication failed: {0}")]
+    Auth(#[from] AuthError),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum AuthError {
+    #[error("no saved token, run `abrasive-cli auth` first")]
+    NoSavedToken,
+
+    #[error("no HOME or XDG_CONFIG_HOME set")]
+    NoHome,
+
+    #[error("could not write token file: {0}")]
+    WriteToken(#[source] std::io::Error),
+
+    #[error("device code request failed: {0}")]
+    DeviceCodeRequest(#[source] ureq::Error),
+
+    #[error("device code response parse failed: {0}")]
+    DeviceCodeParse(#[source] std::io::Error),
+
+    #[error("token poll failed: {0}")]
+    TokenPoll(#[source] ureq::Error),
+
+    #[error("token poll parse failed: {0}")]
+    TokenPollParse(#[source] std::io::Error),
+
+    #[error("device code expired before authorization; run `abrasive-cli auth` again")]
+    DeviceCodeExpired,
+
+    #[error("authorization denied by user")]
+    AuthorizationDenied,
+
+    #[error("github device flow error: {0}")]
+    GitHub(String),
+
+    #[error("unexpected token response from github: {0}")]
+    UnexpectedResponse(serde_json::Value),
 }
 
 pub type CliResult<T> = Result<T, CliError>;
@@ -114,6 +153,12 @@ impl From<std::io::Error> for CliError {
 impl From<abrasive_protocol::DecodeError> for CliError {
     fn from(e: abrasive_protocol::DecodeError) -> Self {
         CliErrorKind::Protocol(e).into()
+    }
+}
+
+impl From<AuthError> for CliError {
+    fn from(e: AuthError) -> Self {
+        CliErrorKind::Auth(e).into()
     }
 }
 

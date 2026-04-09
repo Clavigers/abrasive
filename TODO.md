@@ -53,12 +53,7 @@
 [POLISH] Make `--version` / `--help` work outside an abrasive workspace (currently they get filtered by `should_go_remote` and forwarded to cargo even though they're abrasive subcommands)
 [POLISH] Make "setup" command that syncs and interactively writes an abrasive.toml file
 [POLISH] WebSocket Ping/Pong keepalive: tungstenite doesn't auto-pong on the sync API; long builds may need an explicit ping loop or a read timeout policy to detect dead peers (right now we just silently `continue` past Ping/Pong frames)
-[POLISH] Replace `expect("ABRASIVE_TOKEN env var must be set")` panic in the daemon with a clean startup error once auth has a real config story
 
 ## ASAP
-
-github auth
-[AUTH] Replace ABRASIVE_TOKEN env-var stub with the real GitHub OAuth flow on both client and daemon (token is currently a hardcoded shared secret read at daemon startup)
-[AUTH] Per-user token validation in the daemon (lookup, revocation, expiry) — current impl is a single string compare against env
 
 make multiple clones per scope (slots) M=4 add queue and fingerprint

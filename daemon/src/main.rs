@@ -1,21 +1,30 @@
-use abrasive_protocol::{BuildRequest, Manifest, Message, PlatformTriple};
-use std::env;
+mod auth;
+mod constants;
+mod errors;
+
+use abrasive_protocol::{BuildRequest, FileEntry, Manifest, Message, PlatformTriple};
+use rayon::prelude::*;
 use rustls::ServerConnection;
 use rustls::StreamOwned;
-use std::collections::HashMap;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
+use std::env;
 use std::fs;
 use std::io::{BufReader, Read};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use rayon::prelude::*;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
+use std::sync::mpsc::Sender;
 use std::thread;
+use std::time::Instant;
 use tungstenite::Message as WsMessage;
 use tungstenite::WebSocket;
 use tungstenite::handshake::HandshakeError;
 use tungstenite::handshake::server::{ErrorResponse, Request, Response};
 use tungstenite::http;
+
+use crate::errors::{AuthError, DaemonError};
 
 /// Commands that accept --target
 const TARGET_COMMANDS: &[&str] = &["build", "check", "test", "bench", "clippy", "doc"];
@@ -23,74 +32,252 @@ const TARGET_COMMANDS: &[&str] = &["build", "check", "test", "bench", "clippy", 
 type TlsStream = StreamOwned<ServerConnection, TcpStream>;
 type WsConn = WebSocket<TlsStream>;
 
+fn main() {
+    let tls_config = load_tls_config();
+    let listener = TcpListener::bind("0.0.0.0:8400").unwrap();
+    println!("abrasived TEST listening on :8400 (TLS+WS)");
+    for stream in listener.incoming().flatten() {
+        let config = tls_config.clone();
+        thread::spawn(move || handle(stream, config));
+    }
+}
+
 fn load_tls_config() -> Arc<rustls::ServerConfig> {
     let cert_file = fs::File::open("server.crt").expect("cannot open server.crt");
     let key_file = fs::File::open("server.key").expect("cannot open server.key");
-
     let certs: Vec<_> = rustls_pemfile::certs(&mut BufReader::new(cert_file))
         .collect::<Result<_, _>>()
         .expect("invalid certs");
     let key = rustls_pemfile::private_key(&mut BufReader::new(key_file))
         .expect("cannot read key")
         .expect("no private key found");
-
     let config = rustls::ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(certs, key)
         .expect("bad cert/key");
-
     Arc::new(config)
 }
 
-fn ws_to_io(e: tungstenite::Error) -> std::io::Error {
-    match e {
-        tungstenite::Error::Io(io) => io,
-        other => std::io::Error::new(std::io::ErrorKind::Other, other.to_string()),
+fn handle(tcp_stream: TcpStream, tls_config: Arc<rustls::ServerConfig>) {
+    let peer = peer_addr(&tcp_stream);
+    println!("[{peer}] connected");
+    if let Err(e) = serve(tcp_stream, tls_config, &peer) {
+        println!("[{peer}] {e}");
     }
 }
 
-fn recv_msg(ws: &mut WsConn) -> std::io::Result<Message> {
+fn peer_addr(stream: &TcpStream) -> String {
+    stream.peer_addr().map(|a| a.to_string()).unwrap_or_default()
+}
+
+fn serve(
+    tcp_stream: TcpStream,
+    tls_config: Arc<rustls::ServerConfig>,
+    peer: &str,
+) -> Result<(), DaemonError> {
+    let tls_stream = tls_handshake(tcp_stream, tls_config)?;
+    let mut stream = ws_handshake(tls_stream, peer)?;
+    let manifest = expect_manifest(&mut stream)?;
+    let files = manifest.decode_files()?;
+    let workspace = setup_workspace(&manifest.team, &manifest.scope, peer)?;
+    handle_sync(&mut stream, &workspace, peer, &files)?;
+    let req = expect_build_request(&mut stream)?;
+    let build_workspace = workspace_path(&req.team, &req.scope);
+    run_build(&mut stream, peer, &build_workspace, req);
+    Ok(())
+}
+
+fn tls_handshake(
+    tcp: TcpStream,
+    config: Arc<rustls::ServerConfig>,
+) -> Result<TlsStream, DaemonError> {
+    let conn = ServerConnection::new(config)?;
+    Ok(StreamOwned::new(conn, tcp))
+}
+
+fn ws_handshake(tls_stream: TlsStream, peer: &str) -> Result<WsConn, DaemonError> {
+    let auth_result: RefCell<Option<Result<String, AuthError>>> = RefCell::new(None);
+    let ws_result = tungstenite::accept_hdr(tls_stream, |req: &Request, resp: Response| {
+        authenticate(req, resp, &auth_result)
+    });
+    let stream_or_err: Result<WsConn, DaemonError> = match ws_result {
+        Ok(s) => Ok(s),
+        Err(HandshakeError::Failure(e)) => Err(DaemonError::WebSocket(e)),
+        Err(HandshakeError::Interrupted(_)) => Err(DaemonError::WsHandshakeInterrupted),
+    };
+    if let Some(login) = auth_result.into_inner().transpose()? {
+        println!("[{peer}] authenticated as github user '{login}'");
+    }
+    stream_or_err
+}
+
+fn authenticate(
+    req: &Request,
+    resp: Response,
+    auth_result: &RefCell<Option<Result<String, AuthError>>>,
+) -> Result<Response, ErrorResponse> {
+    let result = match bearer_token(req) {
+        None => Err(AuthError::NoBearerToken),
+        Some(t) => auth::validate(t),
+    };
+    let response = match &result {
+        Ok(_) => Ok(resp),
+        Err(_) => Err(unauthorized()),
+    };
+    *auth_result.borrow_mut() = Some(result);
+    response
+}
+
+fn bearer_token(req: &Request) -> Option<&str> {
+    req.headers()
+        .get("Authorization")?
+        .to_str()
+        .ok()?
+        .strip_prefix("Bearer ")
+        .filter(|t| !t.is_empty())
+}
+
+fn unauthorized() -> ErrorResponse {
+    let mut err: ErrorResponse = http::Response::new(Some("unauthorized".to_string()));
+    *err.status_mut() = http::StatusCode::UNAUTHORIZED;
+    err
+}
+
+fn expect_manifest(stream: &mut WsConn) -> Result<Manifest, DaemonError> {
+    match recv_msg(stream)? {
+        Message::Manifest(m) => Ok(m),
+        other => Err(DaemonError::UnexpectedMessage {
+            expected: "Manifest",
+            got: format!("{other:?}"),
+        }),
+    }
+}
+
+fn expect_build_request(stream: &mut WsConn) -> Result<BuildRequest, DaemonError> {
+    match recv_msg(stream)? {
+        Message::BuildRequest(r) => Ok(r),
+        other => Err(DaemonError::UnexpectedMessage {
+            expected: "BuildRequest",
+            got: format!("{other:?}"),
+        }),
+    }
+}
+
+fn recv_msg(ws: &mut WsConn) -> Result<Message, DaemonError> {
     loop {
-        match ws.read().map_err(ws_to_io)? {
-            WsMessage::Binary(data) => {
-                return abrasive_protocol::deserialize(&data)
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()));
-            }
-            WsMessage::Ping(_) | WsMessage::Pong(_) => continue,
-            WsMessage::Close(_) => {
-                return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "client closed"));
-            }
-            WsMessage::Text(_) | WsMessage::Frame(_) => continue,
+        match ws.read()? {
+            WsMessage::Binary(data) => break Ok(abrasive_protocol::deserialize(&data)?),
+            WsMessage::Close(_) => break Err(DaemonError::ClientClosed),
+            _ => continue,
         }
     }
 }
 
-fn send_msg(ws: &mut WsConn, msg: &Message) -> std::io::Result<()> {
+fn send_msg(ws: &mut WsConn, msg: &Message) -> Result<(), DaemonError> {
     let payload = abrasive_protocol::serialize(msg);
-    ws.send(WsMessage::Binary(payload)).map_err(ws_to_io)?;
+    ws.send(WsMessage::Binary(payload))?;
     Ok(())
 }
 
-fn hash_file(path: &Path) -> Option<[u8; 32]> {
-    let data = fs::read(path).ok()?;
-    Some(*blake3::hash(&data).as_bytes())
+fn setup_workspace(team: &str, scope: &str, peer: &str) -> Result<PathBuf, DaemonError> {
+    let workspace = workspace_path(team, scope);
+    fs::create_dir_all(&workspace)?;
+    ensure_target_on_tmpfs(&workspace, team, scope, peer);
+    Ok(workspace)
+}
+
+fn workspace_path(team: &str, scope: &str) -> PathBuf {
+    let home = env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+    PathBuf::from(format!("{}/{}_{}", home, team, scope))
+}
+
+fn handle_sync(
+    stream: &mut WsConn,
+    workspace: &Path,
+    peer: &str,
+    client_files: &[FileEntry],
+) -> Result<(), DaemonError> {
+    let local = local_manifest_timed(workspace, peer);
+    let needed = needed_files(client_files, &local);
+    delete_stale(workspace, &local, client_files);
+    println!("[{peer}] sync: need {}/{} files", needed.len(), client_files.len());
+    send_msg(stream, &Message::NeedFiles(needed))?;
+    receive_files(stream, workspace)?;
+    println!("[{peer}] sync complete");
+    send_msg(stream, &Message::SyncAck)
+}
+
+fn local_manifest_timed(workspace: &Path, peer: &str) -> HashMap<String, [u8; 32]> {
+    let t0 = Instant::now();
+    let local = local_manifest(workspace);
+    println!(
+        "[{peer}] local_manifest: {} files in {:?}",
+        local.len(),
+        t0.elapsed()
+    );
+    local
+}
+
+fn needed_files(client: &[FileEntry], local: &HashMap<String, [u8; 32]>) -> Vec<String> {
+    client
+        .iter()
+        .filter(|f| local.get(&f.path) != Some(&f.hash))
+        .map(|f| f.path.clone())
+        .collect()
+}
+
+fn delete_stale(workspace: &Path, local: &HashMap<String, [u8; 32]>, client: &[FileEntry]) {
+    let client_paths: HashSet<&str> = client.iter().map(|f| f.path.as_str()).collect();
+    for local_path in local.keys() {
+        if !client_paths.contains(local_path.as_str()) {
+            let _ = fs::remove_file(workspace.join(local_path));
+        }
+    }
+}
+
+fn receive_files(stream: &mut WsConn, workspace: &Path) -> Result<(), DaemonError> {
+    loop {
+        match recv_msg(stream)? {
+            Message::FileData { path, contents } => write_file(workspace, &path, &contents)?,
+            Message::SyncDone => break Ok(()),
+            other => {
+                break Err(DaemonError::UnexpectedMessage {
+                    expected: "FileData or SyncDone",
+                    got: format!("{other:?}"),
+                });
+            }
+        }
+    }
+}
+
+fn write_file(workspace: &Path, path: &str, contents: &[u8]) -> Result<(), DaemonError> {
+    let dest = workspace.join(path);
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&dest, contents)?;
+    Ok(())
 }
 
 fn local_manifest(workspace: &Path) -> HashMap<String, [u8; 32]> {
     if !workspace.exists() {
-        return HashMap::new();
+        HashMap::new()
+    } else {
+        hash_paths(workspace, &walk_workspace(workspace))
     }
+}
 
-    // 1. Walk (single-threaded)
-    let paths: Vec<PathBuf> = walkdir::WalkDir::new(workspace)
+fn walk_workspace(workspace: &Path) -> Vec<PathBuf> {
+    walkdir::WalkDir::new(workspace)
         .into_iter()
         .filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_file())
         .filter(|e| !e.path().components().any(|c| c.as_os_str() == "target"))
         .map(|e| e.into_path())
-        .collect();
+        .collect()
+}
 
-    // 2. Hash in parallel
+fn hash_paths(workspace: &Path, paths: &[PathBuf]) -> HashMap<String, [u8; 32]> {
     paths
         .par_iter()
         .filter_map(|p| {
@@ -101,227 +288,90 @@ fn local_manifest(workspace: &Path) -> HashMap<String, [u8; 32]> {
         .collect()
 }
 
-fn handle_sync(
-    stream: &mut WsConn,
-    workspace: &Path,
-    peer: &str,
-    client_files: &[abrasive_protocol::FileEntry],
-) -> std::io::Result<()> {
-    // Diff against local state
-    let t0 = std::time::Instant::now();
-    let local = local_manifest(workspace);
-    println!("[{peer}] local_manifest: {} files in {:?}", local.len(), t0.elapsed());
-    let needed: Vec<String> = client_files
-        .iter()
-        .filter(|f| local.get(&f.path) != Some(&f.hash))
-        .map(|f| f.path.clone())
-        .collect();
-
-    // Delete stale files
-    let client_paths: std::collections::HashSet<&str> =
-        client_files.iter().map(|f| f.path.as_str()).collect();
-    for local_path in local.keys() {
-        if !client_paths.contains(local_path.as_str()) {
-            let _ = fs::remove_file(workspace.join(local_path));
-        }
-    }
-
-    println!("[{peer}] sync: need {}/{} files", needed.len(), client_files.len());
-    send_msg(stream, &Message::NeedFiles(needed))?;
-
-    // 3. Receive files
-    loop {
-        match recv_msg(stream)? {
-            Message::FileData { path, contents } => {
-                let dest = workspace.join(&path);
-                if let Some(parent) = dest.parent() {
-                    fs::create_dir_all(parent).ok();
-                }
-                fs::write(&dest, &contents)?;
-            }
-            Message::SyncDone => break,
-            other => {
-                println!("[{peer}] unexpected during sync: {other:?}");
-                return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "unexpected message"));
-            }
-        }
-    }
-
-    println!("[{peer}] sync complete");
-    send_msg(stream, &Message::SyncAck)?;
-    Ok(())
-}
-
-fn handle(tcp_stream: TcpStream, tls_config: Arc<rustls::ServerConfig>, expected_token: Arc<String>) {
-    let peer = tcp_stream
-        .peer_addr()
-        .map(|a| a.to_string())
-        .unwrap_or_default();
-    println!("[{peer}] connected");
-
-    let tls_conn = match ServerConnection::new(tls_config) {
-        Ok(c) => c,
-        Err(e) => {
-            println!("[{peer}] TLS handshake failed: {e}");
-            return;
-        }
-    };
-    let tls_stream = StreamOwned::new(tls_conn, tcp_stream);
-
-    // WebSocket upgrade with bearer token validation. Reject early with
-    // 401 before doing any protocol work.
-    let expected_header = format!("Bearer {expected_token}");
-    let auth_ok = std::cell::Cell::new(false);
-    let ws_result = tungstenite::accept_hdr(tls_stream, |req: &Request, resp: Response| {
-        let presented = req
-            .headers()
-            .get("Authorization")
-            .and_then(|v| v.to_str().ok());
-        if presented == Some(expected_header.as_str()) {
-            auth_ok.set(true);
-            Ok(resp)
-        } else {
-            let mut err: ErrorResponse = http::Response::new(Some("invalid token".to_string()));
-            *err.status_mut() = http::StatusCode::UNAUTHORIZED;
-            Err(err)
-        }
-    });
-    let mut stream: WsConn = match ws_result {
-        Ok(ws) => ws,
-        Err(HandshakeError::Failure(e)) => {
-            if !auth_ok.get() {
-                println!("[{peer}] rejected: bad/missing bearer token");
-            } else {
-                println!("[{peer}] ws handshake failed: {e}");
-            }
-            return;
-        }
-        Err(HandshakeError::Interrupted(_)) => {
-            println!("[{peer}] ws handshake interrupted");
-            return;
-        }
-    };
-
-    let manifest = match recv_msg(&mut stream) {
-        Ok(Message::Manifest(m)) => m,
-        Ok(other) => {
-            println!("[{peer}] expected Manifest, got: {other:?}");
-            return;
-        }
-        Err(e) => {
-            println!("[{peer}] read error: {e}");
-            return;
-        }
-    };
-
-    let files = match manifest.decode_files() {
-        Ok(f) => f,
-        Err(e) => {
-            println!("[{peer}] failed to decode manifest: {e}");
-            return;
-        }
-    };
-    let Manifest { team, scope, files_gz: _ } = manifest;
-    let workspace = workspace_path(&team, &scope);
-    if let Err(e) = fs::create_dir_all(&workspace) {
-        println!("[{peer}] failed to create workspace {}: {e}", workspace.display());
-        return;
-    }
-    ensure_target_on_tmpfs(&workspace, &team, &scope, &peer);
-
-    if let Err(e) = handle_sync(&mut stream, &workspace, &peer, &files) {
-        println!("[{peer}] sync failed: {e}");
-        return;
-    }
-
-    let req = match recv_msg(&mut stream) {
-        Ok(Message::BuildRequest(req)) => req,
-        Ok(other) => {
-            println!("[{peer}] expected BuildRequest, got: {other:?}");
-            return;
-        }
-        Err(e) => {
-            println!("[{peer}] read error: {e}");
-            return;
-        }
-    };
-
-    // BuildRequest is self-addressing — resolve its own workspace rather
-    // than assuming it matches the one we just synced.
-    let build_workspace = workspace_path(&req.team, &req.scope);
-    run_build(&mut stream, &peer, &build_workspace, req);
+fn hash_file(path: &Path) -> Option<[u8; 32]> {
+    let data = fs::read(path).ok()?;
+    Some(*blake3::hash(&data).as_bytes())
 }
 
 /// Make `<workspace>/target` live on tmpfs (/dev/shm) so cargo's
 /// write-heavy build artifacts skip the disk entirely. We do this with
 /// a symlink rather than a mount so we don't need root or namespacing.
-///
-/// Behavior:
-/// - If `target` doesn't exist: create the tmpfs dir and symlink it in.
-/// - If `target` is already the right symlink: nothing to do.
-/// - If `target` is a real directory or some other symlink: leave it
-///   alone and warn (we don't want to nuke prior build state by surprise).
 fn ensure_target_on_tmpfs(workspace: &Path, team: &str, scope: &str, peer: &str) {
     let tmpfs_target = PathBuf::from(format!("/dev/shm/abrasive-targets/{}_{}", team, scope));
     let target_link = workspace.join("target");
-
     if let Err(e) = fs::create_dir_all(&tmpfs_target) {
         println!("[{peer}] tmpfs target unavailable ({e}); falling back to disk");
         return;
     }
+    wire_up_target_symlink(&target_link, &tmpfs_target, peer);
+}
 
-    match fs::symlink_metadata(&target_link) {
+fn wire_up_target_symlink(target_link: &Path, tmpfs_target: &Path, peer: &str) {
+    match fs::symlink_metadata(target_link) {
         Ok(meta) if meta.file_type().is_symlink() => {
-            if fs::read_link(&target_link).ok().as_deref() == Some(tmpfs_target.as_path()) {
-                return; // already wired up
-            }
-            println!("[{peer}] target/ is a symlink to something else; leaving alone");
+            warn_if_symlink_mismatch(target_link, tmpfs_target, peer)
         }
-        Ok(_) => {
-            println!("[{peer}] target/ is a real directory; leaving alone (delete it manually to enable tmpfs)");
-        }
-        Err(_) => {
-            // Doesn't exist — create the symlink.
-            #[cfg(unix)]
-            if let Err(e) = std::os::unix::fs::symlink(&tmpfs_target, &target_link) {
-                println!("[{peer}] failed to symlink target -> {}: {e}", tmpfs_target.display());
-            } else {
-                println!("[{peer}] target/ -> {}", tmpfs_target.display());
-            }
-        }
+        Ok(_) => println!(
+            "[{peer}] target/ is a real directory; leaving alone (delete it manually to enable tmpfs)"
+        ),
+        Err(_) => create_target_symlink(target_link, tmpfs_target, peer),
     }
 }
 
-fn workspace_path(team: &str, scope: &str) -> PathBuf {
-    let home = env::var("HOME").unwrap_or_else(|_| "/root".to_string());
-    PathBuf::from(format!("{}/{}_{}", home, team, scope))
+fn warn_if_symlink_mismatch(target_link: &Path, tmpfs_target: &Path, peer: &str) {
+    if fs::read_link(target_link).ok().as_deref() != Some(tmpfs_target) {
+        println!("[{peer}] target/ is a symlink to something else; leaving alone");
+    }
 }
 
+#[cfg(unix)]
+fn create_target_symlink(target_link: &Path, tmpfs_target: &Path, peer: &str) {
+    if let Err(e) = std::os::unix::fs::symlink(tmpfs_target, target_link) {
+        println!(
+            "[{peer}] failed to symlink target -> {}: {e}",
+            tmpfs_target.display()
+        );
+    } else {
+        println!("[{peer}] target/ -> {}", tmpfs_target.display());
+    }
+}
+
+#[cfg(not(unix))]
+fn create_target_symlink(_target_link: &Path, _tmpfs_target: &Path, _peer: &str) {}
+
 fn run_build(stream: &mut WsConn, peer: &str, workspace: &Path, req: BuildRequest) {
-    let BuildRequest {
-        cargo_args,
-        subdir,
-        host_platform,
-        team: _,
-        scope: _,
-    } = req;
+    let cargo_args = build_cargo_args(req.cargo_args, req.host_platform);
+    let cd_target = build_dir(workspace, req.subdir.as_deref());
+    println!(
+        "[{peer}] mold -run cargo +nightly {} (in {})",
+        cargo_args.join(" "),
+        cd_target.display()
+    );
+    match spawn_cargo(&cargo_args, &cd_target) {
+        Ok(child) => forward_build_output(stream, child, peer),
+        Err(e) => send_spawn_failure(stream, &e),
+    }
+}
 
-    let (cargo_args, _run_it) = rewrite_run_as_build(cargo_args);
-    let cargo_args = amend_args_with_platform(cargo_args, host_platform);
+fn build_cargo_args(args: Vec<String>, platform: PlatformTriple) -> Vec<String> {
+    let (args, _run_it) = rewrite_run_as_build(args);
+    amend_args_with_platform(args, platform)
+}
 
-    let cd_target = match &subdir {
+fn build_dir(workspace: &Path, subdir: Option<&str>) -> PathBuf {
+    match subdir {
         Some(rel) => workspace.join(rel),
         None => workspace.to_path_buf(),
-    };
+    }
+}
 
-    println!("[{peer}] mold -run cargo +nightly {} (in {})", cargo_args.join(" "), cd_target.display());
-
-    let mut child = match Command::new("mold")
+fn spawn_cargo(args: &[String], cd: &Path) -> std::io::Result<Child> {
+    Command::new("mold")
         .arg("-run")
         .arg("cargo")
         .arg("+nightly")
-        .args(&cargo_args)
-        .current_dir(&cd_target)
+        .args(args)
+        .current_dir(cd)
         // Override [profile.dev] debug = "line-tables-only" without
         // touching the user's Cargo.toml. Backtraces still work; rustc
         // skips most DWARF generation. Big win on cold builds.
@@ -336,73 +386,51 @@ fn run_build(stream: &mut WsConn, peer: &str, workspace: &Path, req: BuildReques
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            let _ = send_msg(
-                stream,
-                &Message::BuildStderr(format!("failed to spawn cargo: {e}\n").into_bytes()),
-            );
-            let _ = send_msg(stream, &Message::BuildFinished { exit_code: 1 });
-            return;
-        }
-    };
+}
 
-    // Merge stdout and stderr via a channel so they interleave naturally
+fn send_spawn_failure(stream: &mut WsConn, e: &std::io::Error) {
+    let msg = format!("failed to spawn cargo: {e}\n").into_bytes();
+    let _ = send_msg(stream, &Message::BuildStderr(msg));
+    let _ = send_msg(stream, &Message::BuildFinished { exit_code: 1 });
+}
+
+fn forward_build_output(stream: &mut WsConn, mut child: Child, peer: &str) {
     let stdout = child.stdout.take().unwrap();
     let stderr = child.stderr.take().unwrap();
     let (tx, rx) = std::sync::mpsc::channel::<Message>();
-
-    let tx_out = tx.clone();
-    thread::spawn(move || {
-        let mut buf = [0u8; 4096];
-        let mut reader = stdout;
-        loop {
-            match reader.read(&mut buf) {
-                Ok(0) | Err(_) => break,
-                Ok(n) => {
-                    let _ = tx_out.send(Message::BuildStdout(buf[..n].to_vec()));
-                }
-            }
-        }
-    });
-
-    let tx_err = tx;
-    thread::spawn(move || {
-        let mut buf = [0u8; 4096];
-        let mut reader = stderr;
-        loop {
-            match reader.read(&mut buf) {
-                Ok(0) | Err(_) => break,
-                Ok(n) => {
-                    let _ = tx_err.send(Message::BuildStderr(buf[..n].to_vec()));
-                }
-            }
-        }
-    });
-
+    spawn_pipe_reader(stdout, tx.clone(), Message::BuildStdout);
+    spawn_pipe_reader(stderr, tx, Message::BuildStderr);
     for msg in rx {
         let _ = send_msg(stream, &msg);
     }
-
-    let status = child.wait().unwrap();
-    if let Err(e) = send_msg(
-        stream,
-        &Message::BuildFinished {
-            exit_code: status.code().unwrap_or(1) as u8,
-        },
-    ) {
-        println!("[{peer}] failed to send BuildFinished: {e}");
-    }
+    let exit_code = child.wait().map(|s| s.code().unwrap_or(1) as u8).unwrap_or(1);
+    let _ = send_msg(stream, &Message::BuildFinished { exit_code });
     let _ = stream.close(None);
     println!("[{peer}] done");
+}
+
+fn spawn_pipe_reader<R: Read + Send + 'static>(
+    mut reader: R,
+    tx: Sender<Message>,
+    wrap: fn(Vec<u8>) -> Message,
+) {
+    thread::spawn(move || {
+        let mut buf = [0u8; 4096];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    let _ = tx.send(wrap(buf[..n].to_vec()));
+                }
+            }
+        }
+    });
 }
 
 fn rewrite_run_as_build(args: Vec<String>) -> (Vec<String>, bool) {
     if args.first().map_or(true, |cmd| cmd != "run") {
         return (args, false);
     }
-
     let mut out = vec!["build".to_string()];
     for arg in args.into_iter().skip(1) {
         if arg == "--" {
@@ -420,27 +448,9 @@ fn amend_args_with_platform(mut args: Vec<String>, platform: PlatformTriple) -> 
     let already_has_target = args
         .iter()
         .any(|a| a == "--target" || a.starts_with("--target="));
-
     if accepts_target && !already_has_target {
         args.push("--target".to_string());
         args.push(platform.as_cargo_target_string());
     }
-
     args
-}
-
-fn main() {
-    let tls_config = load_tls_config();
-    // TEMPORARY: shared bearer token via env var until GitHub OAuth lands.
-    let expected_token = Arc::new(
-        env::var("ABRASIVE_TOKEN")
-            .expect("ABRASIVE_TOKEN env var must be set"),
-    );
-    let listener = TcpListener::bind("0.0.0.0:8400").unwrap();
-    println!("abrasived TEST listening on :8400 (TLS+WS)");
-    for stream in listener.incoming().flatten() {
-        let config = tls_config.clone();
-        let token = expected_token.clone();
-        thread::spawn(move || handle(stream, config, token));
-    }
 }
