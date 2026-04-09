@@ -28,9 +28,11 @@ fn cache() -> &'static TokenCache {
 pub fn validate(token: &str) -> Result<String, AuthError> {
     let key = *blake3::hash(token.as_bytes()).as_bytes();
     if let Some(login) = lookup_cached(&key) {
+        println!("[auth] token cache hit for '{login}'");
         return Ok(login);
     }
     let login = validate_against_github(token)?;
+    println!("[auth] token cache miss, validated '{login}' against github");
     store_cached(key, login.clone());
     Ok(login)
 }
