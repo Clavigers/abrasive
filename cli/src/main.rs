@@ -96,6 +96,10 @@ fn remote_setup() {
 }
 
 fn login() -> CliResult<()> {
+    if auth::saved_token().is_some() {
+        println!("already authenticated (token saved at ~/.config/abrasive/token)");
+        return Ok(());
+    }
     auth::login()?;
     Ok(())
 }
@@ -218,7 +222,8 @@ fn try_remote(ctx: &WorkspaceContext, cargo_args: Vec<String>) -> CliResult<Exit
         return forward_args_to_local();
     }
 
-    let token = auth::token()?;
+    let token = auth::saved_token()
+        .ok_or_else(|| CliError::auth("no saved token, run `abrasive-cli auth` first".into()))?;
 
     let addr: SocketAddr = format!("{}:{}", IP, PORT).parse().unwrap();
     let tcp =

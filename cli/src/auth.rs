@@ -2,7 +2,7 @@
 //!
 //! On first use the CLI runs the device flow: it asks GitHub for a
 //! short user code, prints it along with a URL, and polls until the
-//! user authorizes in their browser. The resulting token is cached at
+//! user authorizes in their browser. The resulting token is saved to
 //! ~/.config/abrasive/token and reused on subsequent invocations.
 //!
 //! The token is a real per-user GitHub token; the daemon validates it
@@ -38,19 +38,16 @@ struct DeviceCodeResp {
     interval: u64,
 }
 
-/// Returns a GitHub access token, running the device flow if necessary.
-pub fn token() -> CliResult<String> {
-    if let Some(t) = read_cached_token() {
-        return Ok(t);
-    }
-    login()
+/// Returns the saved token if one exists. Does NOT run the device flow.
+pub fn saved_token() -> Option<String> {
+    read_saved_token()
 }
 
-/// Always runs the device flow, replacing any cached token.
+/// Always runs the device flow, replacing any saved token.
 pub fn login() -> CliResult<String> {
     let token = device_flow()?;
-    if let Err(e) = write_cached_token(&token) {
-        eprintln!("[auth] warning: could not cache token: {e}");
+    if let Err(e) = write_saved_token(&token) {
+        eprintln!("[auth] warning: could not save token: {e}");
     }
     Ok(token)
 }
@@ -132,7 +129,7 @@ fn token_path() -> Option<PathBuf> {
     Some(base.join("abrasive").join("token"))
 }
 
-fn read_cached_token() -> Option<String> {
+fn read_saved_token() -> Option<String> {
     let path = token_path()?;
     let raw = fs::read_to_string(path).ok()?;
     let trimmed = raw.trim();
@@ -143,7 +140,7 @@ fn read_cached_token() -> Option<String> {
     }
 }
 
-fn write_cached_token(token: &str) -> std::io::Result<()> {
+fn write_saved_token(token: &str) -> std::io::Result<()> {
     let path = token_path()
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::NotFound, "no HOME"))?;
     if let Some(parent) = path.parent() {
