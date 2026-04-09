@@ -155,7 +155,7 @@ fn expect_probe(stream: &mut WsConn) -> Result<ProbeInfo, DaemonError> {
         }),
         other => Err(DaemonError::UnexpectedMessage {
             expected: "Probe",
-            got: format!("{other:?}"),
+            got: other.kind().to_string(),
         }),
     }
 }
@@ -223,7 +223,7 @@ fn expect_manifest(stream: &mut WsConn) -> Result<Manifest, DaemonError> {
         Message::Manifest(m) => Ok(m),
         other => Err(DaemonError::UnexpectedMessage {
             expected: "Manifest",
-            got: format!("{other:?}"),
+            got: other.kind().to_string(),
         }),
     }
 }
@@ -233,7 +233,7 @@ fn expect_build_request(stream: &mut WsConn) -> Result<BuildRequest, DaemonError
         Message::BuildRequest(r) => Ok(r),
         other => Err(DaemonError::UnexpectedMessage {
             expected: "BuildRequest",
-            got: format!("{other:?}"),
+            got: other.kind().to_string(),
         }),
     }
 }
@@ -318,7 +318,7 @@ fn receive_files(stream: &mut WsConn, workspace: &Path) -> Result<(), DaemonErro
             other => {
                 break Err(DaemonError::UnexpectedMessage {
                     expected: "FileData or SyncDone",
-                    got: format!("{other:?}"),
+                    got: other.kind().to_string(),
                 });
             }
         }

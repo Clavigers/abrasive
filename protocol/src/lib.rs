@@ -34,6 +34,28 @@ pub enum Message {
     ProbeMiss,
 }
 
+impl Message {
+    /// Short, human-readable name of the variant — for error messages
+    /// that don't want to Debug-dump entire payloads.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Message::Manifest(_) => "Manifest",
+            Message::NeedFiles(_) => "NeedFiles",
+            Message::FileData { .. } => "FileData",
+            Message::SyncDone => "SyncDone",
+            Message::SyncAck => "SyncAck",
+            Message::BuildRequest(_) => "BuildRequest",
+            Message::BuildStdout(_) => "BuildStdout",
+            Message::BuildStderr(_) => "BuildStderr",
+            Message::BuildFinished { .. } => "BuildFinished",
+            Message::SlotsBusy => "SlotsBusy",
+            Message::Probe { .. } => "Probe",
+            Message::ProbeAccepted => "ProbeAccepted",
+            Message::ProbeMiss => "ProbeMiss",
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Manifest {
     pub team: String,

@@ -8,13 +8,45 @@
 //! return the GitHub login of the connecting user (for logging).
 
 use serde_json::Value;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use crate::constants::{REQUIRED_ORG, USER_AGENT};
 use crate::errors::AuthError;
 
 const USER_URL: &str = "https://api.github.com/user";
+const CACHE_TTL: Duration = Duration::from_secs(300);
+
+type TokenCache = Arc<Mutex<HashMap<[u8; 32], (String, Instant)>>>;
+
+fn cache() -> &'static TokenCache {
+    static CACHE: OnceLock<TokenCache> = OnceLock::new();
+    CACHE.get_or_init(|| Arc::new(Mutex::new(HashMap::new())))
+}
 
 pub fn validate(token: &str) -> Result<String, AuthError> {
+    let key = *blake3::hash(token.as_bytes()).as_bytes();
+    if let Some(login) = lookup_cached(&key) {
+        return Ok(login);
+    }
+    let login = validate_against_github(token)?;
+    store_cached(key, login.clone());
+    Ok(login)
+}
+
+fn lookup_cached(key: &[u8; 32]) -> Option<String> {
+    let map = cache().lock().unwrap();
+    let (login, expires) = map.get(key)?;
+    (Instant::now() < *expires).then(|| login.clone())
+}
+
+fn store_cached(key: [u8; 32], login: String) {
+    let mut map = cache().lock().unwrap();
+    map.insert(key, (login, Instant::now() + CACHE_TTL));
+}
+
+fn validate_against_github(token: &str) -> Result<String, AuthError> {
     let agent = ureq::agent();
     let login = fetch_login(&agent, token)?;
     check_membership(&agent, token, &login)?;
