@@ -68,7 +68,7 @@ download_file() {
 }
 
 install_abrasive() {
-  version="${ABRASIVE_VERSION:-v0.0.1}"
+  version="${ABRASIVE_VERSION:-v0.0.0}"
   os="$(get_os)"
   arch="$(get_arch)"
   install_path="${ABRASIVE_INSTALL_PATH:-$HOME/.local/bin/abrasive}"
