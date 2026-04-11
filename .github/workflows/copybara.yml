@@ -31,9 +31,14 @@ jobs:
           git clone git@github.com:Clavigers/abrasive-cli.git "$tmp"
 
           # Replace cli/ and protocol/ in the public repo
-          rm -rf "$tmp/cli" "$tmp/protocol"
+          rm -rf "$tmp/cli" "$tmp/protocol" "$tmp/.github"
           cp -r cli "$tmp/cli"
           cp -r protocol "$tmp/protocol"
+
+          # Workflows must live at repo root for GitHub Actions
+          if [ -d "$tmp/cli/.github" ]; then
+            cp -r "$tmp/cli/.github" "$tmp/.github"
+          fi
 
           cd "$tmp"
           git add -A
