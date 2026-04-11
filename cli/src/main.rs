@@ -23,7 +23,7 @@ use std::{
 
 const IP: &str = "157.180.55.180";
 const PORT: u16 = 8400;
-const REMOTE_COMMANDS: &[&str] = &["build", "run", "test", "bench", "check", "clippy", "doc", "clean"];
+const REMOTE_COMMANDS: &[&str] = &["build", "run", "test", "bench", "check", "clippy", "doc", "nop", "clean"];
 
 const STYLES: Styles = Styles::styled()
     .header(AnsiColor::Yellow.on_default().bold())
@@ -84,12 +84,24 @@ fn print_version() {
     let _ = Cmd::new("cargo").arg("--version").status();
 }
 
-fn remote_setup() {
-    // create the toml with an interactive menu where the user selects stuff
-    // concurrent with that sync the source to the remote. hopefully by the
-    // time the user is done selecting stuff the sync is already complete
-    // if not it just keeps syncing until its ready.
-    todo!("remote_setup")
+fn remote_setup() -> CliResult<()> {
+    let cwd = env::current_dir().map_err(CliError::no_cwd)?;
+    let scope = cwd
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| CliError::invalid_path(cwd.display().to_string()))?
+        .to_string();
+    let toml_path = cwd.join("abrasive.toml");
+    if toml_path.exists() {
+        eprintln!("abrasive.toml already exists");
+        return Ok(());
+    }
+    let content = format!("[remote]\nhost = \"{IP}\"\nteam = \"public\"\nscope = \"{scope}\"\n");
+    fs::write(&toml_path, &content)?;
+    eprintln!("created abrasive.toml (team=public, scope={scope})");
+    let ctx = WorkspaceContext::from_paths(&toml_path, &cwd)?;
+    try_remote(&ctx, vec!["nop".to_string()])?;
+    Ok(())
 }
 
 fn login() -> CliResult<()> {
@@ -525,7 +537,7 @@ fn run() -> CliResult<ExitCode> {
     // Things Abrasive handles
     let cli = Cli::parse();
     match cli.command {
-        Some(Command::Setup) => remote_setup(),
+        Some(Command::Setup) => remote_setup()?,
         Some(Command::Auth) => login()?,
         Some(Command::Version) => print_version(),
         Some(Command::Help) => print_help(),
