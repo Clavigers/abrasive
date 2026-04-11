@@ -1,3 +1,8 @@
 [tools]
 bun = "latest"
 rust = "latest"
+
+[tasks.website]
+description = "Run the wasteland website dev server"
+dir = "wasteland/website"
+run = "bun run dev"
