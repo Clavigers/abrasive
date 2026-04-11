@@ -38,7 +38,7 @@ jobs:
           cd "$tmp"
           git add -A
           if git diff --cached --quiet; then
-            echo "No changes to sync"
+            echo "There are no changes to sync"
           else
             git commit -m "sync from monorepo ($(git -C "$GITHUB_WORKSPACE" rev-parse --short HEAD))"
             git push origin main
