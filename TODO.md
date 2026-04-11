@@ -51,3 +51,5 @@
 ## ASAP
 
 okay so I also added the agent so ws connection overhead can be lower. I guess at some point I should start that thing up... right now I am doing it manually 
+
+abrasive auth and setup should work without a tom;
