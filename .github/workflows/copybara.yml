@@ -7,6 +7,7 @@ on:
     paths:
       - "cli/**"
       - "protocol/**"
+      - "certs/server.crt"
       - ".github/workflows/copybara.yml"
 
 jobs:
@@ -30,10 +31,12 @@ jobs:
           tmp=$(mktemp -d)
           git clone git@github.com:Clavigers/abrasive-cli.git "$tmp"
 
-          # Replace cli/ and protocol/ in the public repo
-          rm -rf "$tmp/cli" "$tmp/protocol" "$tmp/.github"
+          # Replace cli/, protocol/, and public cert in the public repo
+          rm -rf "$tmp/cli" "$tmp/protocol" "$tmp/certs" "$tmp/.github"
           cp -r cli "$tmp/cli"
           cp -r protocol "$tmp/protocol"
+          mkdir -p "$tmp/certs"
+          cp certs/server.crt "$tmp/certs/server.crt"
 
           # Workflows must live at repo root for GitHub Actions
           if [ -d "$tmp/cli/.github" ]; then
