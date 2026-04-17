@@ -3,7 +3,6 @@
 
 [DESIGN] Convert the half slop image on the web page into a fully non slop vector thing
 
-[INFRA] Auto-deploy daemon to Hetzner on push to master (GitHub Actions: rsync daemon/, rebuild, restart systemd service) like netlify
 [INFRA] Get a real domain like abrasive-rs or abrasivebuild or something
 [INFRA] put abrasive on 1 million package managers
 [INFRA] Stand up reverse proxy (nginx/caddy) in front of the daemon on a real domain, terminate TLS there with Let's Encrypt — prerequisite for OAuth redirect URIs working
@@ -51,7 +50,3 @@
 [POLISH] Move the agent's "client turn-ender" match (`Message::Probe | Manifest | SyncDone | TipRequest`) onto `Message` itself as a `ends_client_turn()` method in `protocol/src/lib.rs`, so the list lives next to the enum and adding a new turn-ending variant is harder to miss. Callsite in `cli/src/bin/abrasive-agent.rs` proxy loop.
 
 ## ASAP
-
-okay so I also added the agent so ws connection overhead can be lower. I guess at some point I should start that thing up... right now I am doing it manually 
-
-abrasive auth and setup should work without a tom;
