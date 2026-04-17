@@ -37,11 +37,7 @@ fn main() {
     }
 }
 
-fn handle(
-    mut client: UnixStream,
-    token: &str,
-    ws: &mut Option<tls::WsConn>,
-) -> io::Result<()> {
+fn handle(mut client: UnixStream, token: &str, ws: &mut Option<tls::WsConn>) -> io::Result<()> {
     if ws.is_none() {
         *ws = Some(connect(token)?);
         eprintln!("[agent] connected to daemon");
@@ -64,7 +60,10 @@ fn proxy(client: &mut UnixStream, ws: &mut tls::WsConn) -> io::Result<()> {
             let data = agent::read_msg(client)?;
             ws.send(WsMessage::Binary(data.clone())).map_err(ws_to_io)?;
             let msg = decode(&data)?;
-            if matches!(msg, Message::Probe { .. } | Message::Manifest(_) | Message::SyncDone) {
+            if matches!(
+                msg,
+                Message::Probe { .. } | Message::Manifest(_) | Message::SyncDone
+            ) {
                 break;
             }
         }
@@ -87,7 +86,7 @@ fn read_ws_binary(ws: &mut tls::WsConn) -> io::Result<Vec<u8>> {
         match ws.read().map_err(ws_to_io)? {
             WsMessage::Binary(data) => break Ok(data),
             WsMessage::Close(_) => {
-                break Err(io::Error::new(io::ErrorKind::ConnectionReset, "ws closed"))
+                break Err(io::Error::new(io::ErrorKind::ConnectionReset, "ws closed"));
             }
             _ => continue,
         }
