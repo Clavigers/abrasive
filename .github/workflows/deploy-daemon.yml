@@ -1,0 +1,33 @@
+name: Deploy daemon
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "daemon/**"
+      - "protocol/**"
+      - "certs/server.crt"
+      - ".github/workflows/deploy-daemon.yml"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Hetzner
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.HETZNER_HOST }}
+          username: abrasive
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            export PATH="$HOME/.local/share/mise/shims:$PATH"
+            cd ~/abrasive
+            git fetch origin master
+            git reset --hard origin/master
+            cargo build --release -p abrasive-daemon
+            sudo install -m755 target/release/abrasive-daemon /opt/abrasive/bin/abrasive-daemon
+            sudo install -m644 certs/server.crt /opt/abrasive/server.crt
+            sudo install -m644 daemon/deploy/abrasived.service /etc/systemd/system/abrasived.service
+            sudo systemctl daemon-reload
+            sudo systemctl restart abrasived
