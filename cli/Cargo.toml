@@ -3,6 +3,10 @@ name = "abrasive-cli"
 version = "0.0.0"
 edition = "2024"
 
+[[bin]]
+name = "abrasive"
+path = "src/main.rs"
+
 [dependencies]
 clap = { version = "4", features = ["derive", "color", "help"] }
 thiserror = "2.0.18"
