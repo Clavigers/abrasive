@@ -12,7 +12,7 @@ const PORT: u16 = 8400;
 
 fn main() {
     let token = auth::saved_token().unwrap_or_else(|| {
-        eprintln!("run `abrasive-cli auth` first");
+        eprintln!("run `abrasive auth` first");
         process::exit(1);
     });
     let path = agent::socket_path();
@@ -62,7 +62,10 @@ fn proxy(client: &mut UnixStream, ws: &mut tls::WsConn) -> io::Result<()> {
             let msg = decode(&data)?;
             if matches!(
                 msg,
-                Message::Probe { .. } | Message::Manifest(_) | Message::SyncDone
+                Message::Probe { .. }
+                    | Message::Manifest(_)
+                    | Message::SyncDone
+                    | Message::TipRequest
             ) {
                 break;
             }
