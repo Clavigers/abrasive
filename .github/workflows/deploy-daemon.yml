@@ -21,12 +21,13 @@ jobs:
           key: ${{ secrets.HETZNER_SSH_KEY }}
           script: |
             set -euo pipefail
-            export PATH="$HOME/.local/share/mise/shims:$PATH"
+            export PATH="$HOME/.cargo/bin:$PATH"
             cd /root/abrasive
             git fetch origin master
             git reset --hard origin/master
-            cargo build --release -p abrasive-daemon
-            install -m644 certs/server.crt daemon/server.crt
-            install -m644 daemon/deploy/abrasived.service /etc/systemd/system/abrasived.service
+            cd daemon
+            cargo build --release
+            install -m644 ../certs/server.crt server.crt
+            install -m644 deploy/abrasived.service /etc/systemd/system/abrasived.service
             systemctl daemon-reload
             systemctl restart abrasived

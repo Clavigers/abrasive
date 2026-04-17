@@ -7,7 +7,7 @@ Wants=network-online.target
 Type=simple
 User=root
 WorkingDirectory=/root/abrasive/daemon
-ExecStart=/root/abrasive/target/release/abrasive-daemon
+ExecStart=/root/abrasive/daemon/target/release/abrasive-daemon
 Restart=always
 RestartSec=2
 
