@@ -136,3 +136,5 @@ HIGH QUALITY REFERENCES ON THIS TOPIC
 https://mmapped.blog/posts/17-scaling-rust-builds-with-bazel
 https://matklad.github.io/2021/09/04/fast-rust-builds.html 
 https://brokenco.de/2025/08/25/sccache-is-pretty-okay.html 
+
+Note !!! the cargo publish / crates io api key gen flow is SO SO SO beautiful we should copy it exactly.
