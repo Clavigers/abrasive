@@ -16,6 +16,7 @@
 [MARKETING] Make Docs
 [MARKETING] De-Slopify the site
 [MARKETING] De-Sussify the Github page for abrasive-cli
+[MARKETING] make cargo the main install path for the cli
 
 [IDEA] run the local cargo and the remote, make them race first to be done wins
 [IDEA] make the init / setup command ask you questions in the foreground while the repo is being synced in the background
