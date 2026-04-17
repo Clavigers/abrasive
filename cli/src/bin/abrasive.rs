@@ -401,7 +401,7 @@ fn resolve_agent_bin() -> Option<PathBuf> {
 }
 
 fn spawn_agent_for_next_time() {
-    if agent::socket_path().exists() {
+    if UnixStream::connect(agent::socket_path()).is_ok() {
         return;
     }
     let Some(agent_bin) = resolve_agent_bin() else {
