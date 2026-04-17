@@ -17,17 +17,16 @@ jobs:
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.HETZNER_HOST }}
-          username: abrasive
+          username: root
           key: ${{ secrets.HETZNER_SSH_KEY }}
           script: |
             set -euo pipefail
             export PATH="$HOME/.local/share/mise/shims:$PATH"
-            cd ~/abrasive
+            cd /root/abrasive
             git fetch origin master
             git reset --hard origin/master
             cargo build --release -p abrasive-daemon
-            sudo install -m755 target/release/abrasive-daemon /opt/abrasive/bin/abrasive-daemon
-            sudo install -m644 certs/server.crt /opt/abrasive/server.crt
-            sudo install -m644 daemon/deploy/abrasived.service /etc/systemd/system/abrasived.service
-            sudo systemctl daemon-reload
-            sudo systemctl restart abrasived
+            install -m644 certs/server.crt daemon/server.crt
+            install -m644 daemon/deploy/abrasived.service /etc/systemd/system/abrasived.service
+            systemctl daemon-reload
+            systemctl restart abrasived

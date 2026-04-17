@@ -5,9 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=abrasive
-WorkingDirectory=/opt/abrasive
-ExecStart=/opt/abrasive/bin/abrasive-daemon
+User=root
+WorkingDirectory=/root/abrasive/daemon
+ExecStart=/root/abrasive/target/release/abrasive-daemon
 Restart=always
 RestartSec=2
 
