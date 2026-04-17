@@ -1,0 +1,33 @@
+name: Deploy daemon
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "daemon/**"
+      - "protocol/**"
+      - "certs/server.crt"
+      - ".github/workflows/deploy-daemon.yml"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Hetzner
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.HETZNER_HOST }}
+          username: root
+          key: ${{ secrets.HETZNER_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            export PATH="$HOME/.cargo/bin:$PATH"
+            cd /root/abrasive
+            git fetch origin master
+            git reset --hard origin/master
+            cd daemon
+            cargo build --release
+            install -m644 ../certs/server.crt server.crt
+            install -m644 deploy/abrasived.service /etc/systemd/system/abrasived.service
+            systemctl daemon-reload
+            systemctl restart abrasived
