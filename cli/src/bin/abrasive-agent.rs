@@ -77,7 +77,9 @@ fn proxy(client: &mut UnixStream, ws: &mut tls::WsConn) -> io::Result<()> {
             let msg = decode(&data)?;
             match msg {
                 Message::ProbeMiss | Message::NeedFiles(_) => break,
-                Message::BuildFinished { .. } | Message::SlotsBusy => return Ok(()),
+                Message::BuildFinished { .. } | Message::SlotsBusy | Message::Tip(_) => {
+                    return Ok(());
+                }
                 _ => {}
             }
         }
