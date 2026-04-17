@@ -48,6 +48,7 @@
 [POLISH] Make `--version` / `--help` work outside an abrasive workspace (currently they get filtered by `should_go_remote` and forwarded to cargo even though they're abrasive subcommands)
 [POLISH] Make "setup" command that syncs and interactively writes an abrasive.toml file
 [POLISH] WebSocket Ping/Pong keepalive: tungstenite doesn't auto-pong on the sync API; long builds may need an explicit ping loop or a read timeout policy to detect dead peers (right now we just silently `continue` past Ping/Pong frames)
+[POLISH] Move the agent's "client turn-ender" match (`Message::Probe | Manifest | SyncDone | TipRequest`) onto `Message` itself as a `ends_client_turn()` method in `protocol/src/lib.rs`, so the list lives next to the enum and adding a new turn-ending variant is harder to miss. Callsite in `cli/src/bin/abrasive-agent.rs` proxy loop.
 
 ## ASAP
 
