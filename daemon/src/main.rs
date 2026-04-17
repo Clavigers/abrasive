@@ -91,7 +91,7 @@ fn serve(
     let tls_stream = tls_handshake(tcp_stream, tls_config)?;
     let (mut stream, login) = ws_handshake(tls_stream, peer)?;
     loop {
-        match serve_one_build(&mut stream, peer, &login, slots, fingerprints) {
+        match serve_one_request(&mut stream, peer, &login, slots, fingerprints) {
             Ok(()) => continue,
             Err(DaemonError::ClientClosed) => break Ok(()),
             Err(DaemonError::WebSocket(tungstenite::Error::Io(ref e)))
@@ -101,14 +101,38 @@ fn serve(
     }
 }
 
-fn serve_one_build(
+fn serve_one_request(
     stream: &mut WsConn,
     peer: &str,
     login: &str,
     slots: &SlotTable,
     fingerprints: &FingerprintCache,
 ) -> Result<(), DaemonError> {
-    let probe = expect_probe(stream)?;
+    match recv_msg(stream)? {
+        Message::Probe { fingerprint, request } => serve_build(
+            stream,
+            peer,
+            login,
+            slots,
+            fingerprints,
+            ProbeInfo { fingerprint, request },
+        ),
+        Message::TipRequest => serve_tip(stream),
+        other => Err(DaemonError::UnexpectedMessage {
+            expected: "Probe or TipRequest",
+            got: other.kind().to_string(),
+        }),
+    }
+}
+
+fn serve_build(
+    stream: &mut WsConn,
+    peer: &str,
+    login: &str,
+    slots: &SlotTable,
+    fingerprints: &FingerprintCache,
+    probe: ProbeInfo,
+) -> Result<(), DaemonError> {
     let team = probe.request.team.clone();
     let scope = probe.request.scope.clone();
     let Some(slot) = slots.try_acquire(&team, &scope, login) else {
@@ -121,6 +145,14 @@ fn serve_one_build(
     } else {
         slow_path(stream, peer, &workspace, &slot, probe, fingerprints)
     }
+}
+
+fn serve_tip(stream: &mut WsConn) -> Result<(), DaemonError> {
+    send_msg(stream, &Message::Tip(pick_a_tip().to_string()))
+}
+
+fn pick_a_tip() -> &'static str {
+    "Reticulating splines!"
 }
 
 fn reject_busy(
@@ -165,16 +197,6 @@ fn slow_path(
 struct ProbeInfo {
     fingerprint: [u8; 32],
     request: BuildRequest,
-}
-
-fn expect_probe(stream: &mut WsConn) -> Result<ProbeInfo, DaemonError> {
-    match recv_msg(stream)? {
-        Message::Probe { fingerprint, request } => Ok(ProbeInfo { fingerprint, request }),
-        other => Err(DaemonError::UnexpectedMessage {
-            expected: "Probe",
-            got: other.kind().to_string(),
-        }),
-    }
 }
 
 fn tls_handshake(
