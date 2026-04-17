@@ -1,0 +1,34 @@
+# Authentication
+
+Abrasive uses token-based authentication to connect to remote build servers.
+
+## Generate a Token
+
+On the remote server, generate an auth token:
+
+```bash
+abrasive-server token create --team my-team
+```
+
+This prints a token string. Store it securely.
+
+## Configure the Client
+
+Add the token to your local configuration:
+
+```toml
+[remote]
+host = "build.example.com"
+port = 9800
+token = "abr_xxxxxxxxxxxxxxxxxxxxx"
+```
+
+Alternatively, set the `ABRASIVE_TOKEN` environment variable:
+
+```bash
+export ABRASIVE_TOKEN="abr_xxxxxxxxxxxxxxxxxxxxx"
+```
+
+## Token Scoping
+
+Tokens are scoped to a team. A token for team `backend` can only access workspaces owned by the `backend` team. See [Core Concepts](/concepts) for more on the team ownership model.

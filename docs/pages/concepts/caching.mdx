@@ -1,0 +1,30 @@
+# Content-Addressed Caching
+
+Abrasive uses content-addressed storage for all build artifacts. This means every file is stored and retrieved by its content hash (SHA-256).
+
+## How It Works
+
+When a build completes, Abrasive hashes each output artifact. If an artifact with the same hash already exists in the cache, the build is a cache hit and no data needs to be transferred.
+
+## Cache Layers
+
+Abrasive maintains two cache layers:
+
+- **Local cache** -- stored in `.abrasive/` in your project directory
+- **Remote cache** -- stored on the build server and shared across the team
+
+On a build request, Abrasive checks the local cache first, then the remote cache, and only runs the build if neither has a hit.
+
+## Cache Invalidation
+
+Cache entries are keyed on the content hash of the inputs. If any input file changes, the hash changes and the old cache entry is no longer used. There is no manual cache invalidation -- correctness is guaranteed by the hashing.
+
+## Inspecting the Cache
+
+```bash
+# Show cache statistics
+abrasive cache stats
+
+# Clear the local cache
+abrasive cache clean
+```

@@ -1,0 +1,55 @@
+# abrasive.toml Reference
+
+Complete reference for all configuration options.
+
+## `[workspace]`
+
+| Key    | Type   | Required | Description                          |
+|--------|--------|----------|--------------------------------------|
+| `name` | string | yes      | Workspace name, unique within a team |
+| `team` | string | yes      | Team that owns this workspace        |
+
+## `[remote]`
+
+| Key     | Type   | Required | Default     | Description                    |
+|---------|--------|----------|-------------|--------------------------------|
+| `host`  | string | yes      | --          | Hostname of the build server   |
+| `port`  | u16    | no       | `9800`      | Port of the build server       |
+| `token` | string | no       | --          | Auth token (or use env var)    |
+
+## `[build]`
+
+| Key         | Type     | Required | Description                             |
+|-------------|----------|----------|-----------------------------------------|
+| `command`   | string   | yes      | Shell command to execute on the remote   |
+| `artifacts` | string[] | no       | Paths to retrieve after a successful build |
+
+## `[cache]`
+
+| Key        | Type   | Required | Default       | Description                  |
+|------------|--------|----------|---------------|------------------------------|
+| `dir`      | string | no       | `.abrasive/`  | Local cache directory        |
+| `max_size` | string | no       | `10GB`        | Maximum local cache size     |
+
+## Full Example
+
+```toml
+[workspace]
+name = "api-server"
+team = "backend"
+
+[remote]
+host = "build.example.com"
+port = 9800
+
+[build]
+command = "cargo build --release"
+artifacts = [
+  "target/release/api-server",
+  "target/release/worker",
+]
+
+[cache]
+dir = ".abrasive/"
+max_size = "20GB"
+```

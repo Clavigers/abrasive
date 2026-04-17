@@ -1,0 +1,33 @@
+{
+  "name": "abrasive-docs",
+  "version": "0.1.0",
+  "description": "Abrasive documentation site",
+  "private": true,
+  "packageManager": "pnpm@10.16.1",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "autoprefixer": "^10.4.21",
+    "clsx": "^2.1.1",
+    "next": "^14.2.35",
+    "nextra": "^3.3.1",
+    "nextra-theme-docs": "^3.3.1",
+    "postcss": "^8.5.6",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tailwind-merge": "^3.5.0",
+    "tailwindcss": "^3.4.18",
+    "tailwindcss-animate": "^1.0.7"
+  },
+  "devDependencies": {
+    "@types/node": "18.11.10",
+    "@types/react": "^18.3.26",
+    "@types/react-dom": "^18.3.7",
+    "postcss-import": "^16.1.1",
+    "typescript": "^5.9.3"
+  },
+  "type": "module"
+}

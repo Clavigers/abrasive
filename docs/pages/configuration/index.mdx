@@ -1,0 +1,30 @@
+# Configuration
+
+All Abrasive configuration lives in a single file: `abrasive.toml` at your project root.
+
+## Quick Example
+
+```toml
+[workspace]
+name = "my-service"
+team = "backend"
+
+[remote]
+host = "build.example.com"
+port = 9800
+token = "abr_xxxxxxxxxxxxxxxxxxxxx"
+
+[build]
+command = "cargo build --release"
+artifacts = ["target/release/my-service"]
+```
+
+## Sections
+
+- **`[workspace]`** -- workspace name and team ownership
+- **`[remote]`** -- connection details for the build server
+- **`[build]`** -- build command and artifact paths
+
+See the full [abrasive.toml Reference](/configuration/toml-reference) for all available options.
+
+Environment variables can override most settings. See [Environment Variables](/configuration/environment-variables).

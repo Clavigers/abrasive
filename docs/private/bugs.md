@@ -1,0 +1,1 @@
+I don't know of any bugs yet but I like the idea of one todo file and one bugs file 

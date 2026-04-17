@@ -1,0 +1,25 @@
+# Environment Variables
+
+All `abrasive.toml` settings can be overridden with environment variables. This is useful for CI environments where you don't want secrets in config files.
+
+## Available Variables
+
+| Variable              | Overrides               | Description                   |
+|-----------------------|-------------------------|-------------------------------|
+| `ABRASIVE_TOKEN`      | `remote.token`          | Authentication token          |
+| `ABRASIVE_HOST`       | `remote.host`           | Build server hostname         |
+| `ABRASIVE_PORT`       | `remote.port`           | Build server port             |
+| `ABRASIVE_TEAM`       | `workspace.team`        | Team name                     |
+| `ABRASIVE_WORKSPACE`  | `workspace.name`        | Workspace name                |
+| `ABRASIVE_CACHE_DIR`  | `cache.dir`             | Local cache directory         |
+
+## Precedence
+
+Environment variables take precedence over `abrasive.toml` values. This allows you to keep a default config in the repo and override per-environment:
+
+```bash
+# CI example
+export ABRASIVE_TOKEN="$CI_ABRASIVE_TOKEN"
+export ABRASIVE_HOST="build-ci.example.com"
+abrasive build
+```

@@ -1,0 +1,33 @@
+# Workspaces
+
+A workspace is an isolated build environment on the remote server. Each workspace belongs to a team and has a name.
+
+## Naming
+
+Workspace names are scoped to teams. The workspace `backend/api-server` belongs to team `backend` and is completely separate from `frontend/api-server` on team `frontend`.
+
+Within a team, workspace names can collide intentionally. If two developers use workspace `backend/api-server`, they share the same remote directory and cache. This is by design -- it enables shared caching across a team.
+
+## Lifecycle
+
+Workspaces are created on first use and persist across builds. You can explicitly clean a workspace:
+
+```bash
+abrasive workspace clean
+```
+
+Or list all workspaces for your team:
+
+```bash
+abrasive workspace list
+```
+
+## Configuration
+
+The workspace name is derived from your `abrasive.toml`:
+
+```toml
+[workspace]
+name = "api-server"
+team = "backend"
+```

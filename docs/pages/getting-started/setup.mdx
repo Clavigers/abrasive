@@ -1,0 +1,51 @@
+# Project Setup
+
+## Initialize a New Project
+
+Run `abrasive init` in your project root to generate an `abrasive.toml` configuration file:
+
+```bash
+cd my-project
+abrasive init
+```
+
+This creates a minimal `abrasive.toml`:
+
+```toml
+[workspace]
+name = "my-project"
+team = "default"
+
+[remote]
+host = "localhost"
+port = 9800
+```
+
+## Directory Structure
+
+Abrasive expects the following layout:
+
+```
+my-project/
+  abrasive.toml       # Project configuration
+  src/                 # Your source code
+  .abrasive/           # Local cache (gitignored)
+```
+
+## Connect to a Remote
+
+Edit `abrasive.toml` to point at your remote build server:
+
+```toml
+[remote]
+host = "build.example.com"
+port = 9800
+```
+
+Then verify the connection:
+
+```bash
+abrasive ping
+```
+
+See [Authentication](/getting-started/auth) to configure credentials.

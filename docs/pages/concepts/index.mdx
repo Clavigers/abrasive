@@ -1,0 +1,25 @@
+# Core Concepts
+
+Abrasive is built around a few key ideas:
+
+## Team Ownership
+
+Teams are the global uniqueness boundary. Workspace names only need to be unique within a team. Collisions within a team are intentional -- if two developers on the same team use the same workspace name, they share cache.
+
+## Content-Addressed Storage
+
+Every build artifact is identified by its content hash. If two builds produce the same output, only one copy is stored. This makes caching automatic and correct.
+
+## Remote Execution
+
+Builds run on remote machines but feel local. Abrasive handles file sync, execution, and artifact retrieval transparently.
+
+## Configuration as Code
+
+All project settings live in `abrasive.toml`. No hidden state, no GUI-only settings.
+
+Dive deeper into each concept:
+
+- [Remote Builds](/concepts/remote-builds)
+- [Workspaces](/concepts/workspaces)
+- [Content-Addressed Caching](/concepts/caching)

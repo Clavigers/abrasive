@@ -1,0 +1,25 @@
+# Welcome to Abrasive
+
+Abrasive is a remote build orchestration tool. It coordinates builds across machines, caches artifacts by content hash, and keeps your team's builds fast and reproducible.
+
+## Why Abrasive?
+
+- **Content-addressed caching** -- every build artifact is stored by its content hash, so identical inputs always produce cache hits
+- **Remote execution** -- offload builds to powerful remote machines while developing locally
+- **Team-scoped workspaces** -- collisions within a team are intentional; team names are the global uniqueness boundary
+- **Simple configuration** -- a single `abrasive.toml` at your project root defines everything
+
+## Quick Start
+
+```bash
+# Install abrasive
+cargo install abrasive
+
+# Initialize a project
+abrasive init
+
+# Run your first remote build
+abrasive build
+```
+
+Head to [Installation](/getting-started/install) to get started.

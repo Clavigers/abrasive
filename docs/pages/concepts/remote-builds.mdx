@@ -1,0 +1,28 @@
+# Remote Builds
+
+Remote builds are the core feature of Abrasive. Instead of compiling on your local machine, Abrasive sends your source to a remote build server, executes the build there, and retrieves the results.
+
+## How It Works
+
+1. **Probe** -- Abrasive hashes your source tree and sends the manifest to the remote
+2. **Sync** -- Only files that changed since the last build are transferred
+3. **Build** -- The remote executes your build command in an isolated workspace
+4. **Retrieve** -- Build artifacts are pulled back to your local machine and cached
+
+## Benefits
+
+- **Faster builds** -- Remote machines can have more CPU cores, RAM, and faster disks
+- **Consistent environment** -- Everyone on the team builds in the same environment
+- **Cache sharing** -- Build artifacts are shared across the team via content-addressed storage
+
+## Running a Remote Build
+
+```bash
+abrasive build
+```
+
+This reads your `abrasive.toml`, connects to the configured remote, and orchestrates the full probe-sync-build-retrieve cycle.
+
+## Build Output
+
+Build output is streamed to your terminal in real time. Exit codes from the remote build are propagated locally, so Abrasive integrates naturally with scripts and CI.
