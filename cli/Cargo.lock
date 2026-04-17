@@ -3,7 +3,7 @@
 version = 4
 
 [[package]]
-name = "abrasive-cli"
+name = "abrasive"
 version = "0.0.1"
 dependencies = [
  "abrasive-protocol",
@@ -23,7 +23,7 @@ dependencies = [
 
 [[package]]
 name = "abrasive-protocol"
-version = "0.0.0"
+version = "0.0.1"
 dependencies = [
  "bincode",
  "flate2",

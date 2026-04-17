@@ -1,10 +1,10 @@
 /// This is the entry point fot the abrasive CLI
 /// 
-use abrasive_cli::agent;
-use abrasive_cli::auth;
-use abrasive_cli::errors::{self, CliError, CliResult};
-use abrasive_cli::platform::host_triple;
-use abrasive_cli::tls;
+use abrasive::agent;
+use abrasive::auth;
+use abrasive::errors::{self, CliError, CliResult};
+use abrasive::platform::host_triple;
+use abrasive::tls;
 use abrasive_protocol::{BuildRequest, FileEntry, Manifest, Message};
 use clap::builder::styling::{AnsiColor, Styles};
 use clap::{CommandFactory, Parser, Subcommand};
