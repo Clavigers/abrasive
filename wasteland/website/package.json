@@ -7,6 +7,7 @@
     "preview": "bunx --bun astro preview"
   },
   "dependencies": {
+    "@astrojs/mdx": "^5.0.3",
     "astro": "^5"
   }
 }
