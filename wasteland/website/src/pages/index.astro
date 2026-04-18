@@ -2,29 +2,64 @@
 import Base from '../layouts/Base.astro';
 import { Image } from 'astro:assets';
 import abrasiveBlock from '../abrasive_block.png';
+import abrasiveLetters from '../AbrasiveLetters.png';
+import trifoil from '../Trifoil.png';
+import likeADog from '../LikeADog.png';
+import Button from '../components/Button.astro';
+import InstallCommand from '../components/InstallCommand.astro';
 ---
 <Base title="abrasive">
+  <div class="brand-banner" slot="top-banner" aria-hidden="true">
+    <div class="brand-tagline">
+      <span>FAST</span>
+      <span>RUST</span>
+      <span>BUILDS</span>
+    </div>
+    <div class="brand-banner-inner">
+      <Image src={abrasiveLetters} alt="ABRASIVE" class="brand-letters" />
+      <Image src={trifoil} alt="Claviger" class="brand-trifoil" />
+    </div>
+  </div>
   <main>
-    <Image src={abrasiveBlock} alt="ABRASIVE" class="logo" />
-    <div class="install">
-      <p class="label">Install</p>
-      <div class="install-inner">
-        <div class="code-block">
-          <code id="install-cmd">cargo install abrasive</code>
-          <button class="copy-btn" aria-label="Copy to clipboard">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
-              <path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25z"/>
-              <path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25z"/>
-            </svg>
-          </button>
-        </div>
-        <a href="/get_abrasive" class="more-methods">More installation methods &rarr;</a>
+    <div class="hero">
+      <div class="hero-image">
+        <Image src={abrasiveBlock} alt="ABRASIVE" class="logo" />
+        <a href="https://www.redbubble.com/" class="sticker-link" aria-label="Stickers" target="_blank" rel="noopener noreferrer">
+          <Image src={likeADog} alt="" class="sticker" />
+        </a>
       </div>
+      <div class="cta">
+        <InstallCommand large />
+        <div class="buttons">
+          <Button href="/demo">Demo &#9655;</Button>
+          <Button href="/getting-started" primary>Get Started</Button>
+        </div>
+      </div>
+      <aside class="snippet">
+        <p><mark>WARNING!</mark> This is Pre-Alpha software. There are likely to be issues. Feel free to reach out to me directly at <a href="mailto:sadosystemz@gmail.com">sadosystemz@gmail.com</a> with any problems.</p>
+      </aside>
     </div>
-    <div class="buttons">
-      <a href="/demo" class="btn">Demo &#9655;</a>
-      <a href="/getting-started" class="btn btn-primary">Get Started</a>
-    </div>
+
+    <section class="founder-letter">
+      <header>
+        <h2>How we sped up Rust build times at Claviger by 10x</h2>
+      </header>
+      <article>
+        <p>Abrasive is done for you remote build and cache sharing infrastructure. Building on a powerful remote machine tuned for rust compilation workloads often yields a speed up on its own, especially if you are running something other than a Ryzen 9.</p> 
+        <p>Abrasive uses a few other tricks to make things even faster. We built an sccache-like RUSTC_WRAPPER designed for cargo from the ground up. unlike sccache our remote-cargo-disk-cache works with rustc incremental compilation build.rs scripts and proc macros.</p>
+        <p>We also built a distributed compilation orchestrator heavily inspired by Maelstrom and cargo-nextest</p>
+        <p>The other big concern for getting a shared cache to work is hermeticity, we achieve this with Maelstrom like fast containers and post-hoc verification</p>
+        <p>So, we invite you to poke around, read the <a href="/getting-started">docs</a>, and try abrasive for free. We'd be honored to have you as a user. Thank you.</p>
+      </article>
+      <div class="signature">
+        <span class="sig-handwritten">Will Murray</span>
+        <dl>
+          <dt><a href="mailto:sadosystemz@gmail.com">sadosystemz@gmail.com</a></dt>
+          <dd>Founder of Claviger</dd>
+        </dl>
+      </div>
+    </section>
+
     <div class="spacer"></div>
   </main>
 </Base>
@@ -33,111 +68,364 @@ import abrasiveBlock from '../abrasive_block.png';
   .spacer {
     min-height: 40vh;
   }
+  .founder-letter {
+    --letter-base: max(1.15rem, 1.55vw);
+    width: min(100%, 1280px);
+    margin: 6rem auto 2rem;
+    padding: 0 2rem;
+    font-family: "Figtree", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: var(--letter-base);
+    color: var(--fg);
+    letter-spacing: -0.025em;
+    text-align: center;
+  }
+  .founder-letter header {
+    margin-bottom: 3rem;
+  }
+  .founder-letter header h2 {
+    font-family: "Figtree", -apple-system, sans-serif;
+    font-size: max(2rem, 4.5vw);
+    font-weight: 700;
+    line-height: 1.1;
+    letter-spacing: -0.035em;
+    color: var(--fg);
+    margin: 0 auto;
+    max-width: min(900px, 100%);
+  }
+  .founder-letter article {
+    column-gap: 3rem;
+    text-align: left;
+    max-width: 100%;
+    margin: 0 auto;
+  }
+  @media (min-width: 900px) {
+    .founder-letter article {
+      column-count: 2;
+    }
+  }
+  .founder-letter article p {
+    font-size: inherit;
+    font-weight: 400;
+    line-height: 1.45;
+    margin: 0 0 1.05em;
+    break-inside: avoid-column;
+  }
+  .founder-letter article strong {
+    font-weight: 700;
+    color: var(--fg);
+  }
+  .founder-letter article a {
+    color: #58a6ff;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    font-weight: inherit;
+  }
+  .founder-letter article a:hover {
+    color: #80b9ff;
+  }
+  .founder-letter article code {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.88em;
+    background: var(--code-bg);
+    padding: 0.1em 0.35em;
+    border-radius: 4px;
+    color: var(--accent);
+  }
+  .signature {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.4rem;
+    margin: 3rem 0 0 auto;
+    width: fit-content;
+    text-align: right;
+  }
+  .sig-handwritten {
+    font-family: "Caveat", cursive;
+    font-size: 3rem;
+    font-weight: 500;
+    color: var(--fg);
+    line-height: 1;
+    transform: rotate(-3deg);
+    transform-origin: right center;
+    margin-bottom: 0.4rem;
+  }
+  .signature dl {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    margin: 0;
+    font-size: 0.95rem;
+    line-height: 1.4;
+  }
+  .signature dt {
+    color: var(--fg);
+    font-weight: 500;
+    margin: 0;
+  }
+  .signature dt a {
+    color: #58a6ff;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .signature dt a:hover {
+    color: #80b9ff;
+  }
+  .signature dd {
+    color: var(--muted);
+    font-style: italic;
+    font-size: 0.88rem;
+    margin: 0;
+  }
   main {
-    padding-top: 4rem;
+    padding-top: 1rem;
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 1.5rem;
   }
+  .hero {
+    display: grid;
+    grid-template-columns: auto auto;
+    grid-template-areas:
+      "cta image"
+      "snippet image";
+    gap: 1.25rem 0.5rem;
+    align-items: start;
+    justify-content: center;
+  }
+  .cta {
+    grid-area: cta;
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    align-items: flex-start;
+    margin-top: 20px;
+  }
+  .hero-image {
+    grid-area: image;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+    position: relative;
+  }
   .logo {
-    width: 560px;
+    width: 480px;
     max-width: 90vw;
     height: auto;
     border-radius: 8px;
+    filter: saturate(0.87);
   }
-  .label {
-    color: var(--muted);
-    font-size: 0.85rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin-bottom: 0.5rem;
-  }
-  .code-block {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.75rem;
-    background: var(--code-bg);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 0.75rem 1rem;
-    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-    font-size: 0.9rem;
-    white-space: nowrap;
-  }
-  code {
-    color: var(--accent);
-    user-select: all;
-    white-space: nowrap;
-  }
-  .copy-btn {
-    background: none;
-    border: none;
-    color: var(--muted);
-    cursor: pointer;
-    padding: 4px;
-    border-radius: 4px;
-    display: flex;
-    align-items: center;
-    transition: color 0.15s;
-  }
-  .copy-btn:hover {
-    color: var(--fg);
-  }
-  .install-inner {
-    display: inline-flex;
-    flex-direction: column;
-    align-items: flex-start;
-  }
-  .more-methods {
+  .sticker-link {
+    position: absolute;
+    top: 100%;
+    left: 50%;
     display: inline-block;
-    margin-top: 0.4rem;
-    color: var(--muted);
-    font-size: 0.8rem;
-    text-decoration: none;
-    transition: color 0.15s;
+    transform: translate(calc(-50% - 30px), 0px);
   }
-  .more-methods:hover {
-    color: var(--fg);
+  .sticker {
+    width: 337px;
+    height: auto;
+    opacity: 0.90;
+    transform: rotate(4deg);
+    filter: drop-shadow(1px 2px 3px rgba(0, 0, 0, 0.2));
+    image-rendering: pixelated;
+  }
+  .brand-banner {
+    display: none;
   }
   .buttons {
     display: flex;
-    gap: 1rem;
+    gap: 1.17rem;
   }
-  .btn {
-    padding: 0.6rem 1.5rem;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    color: var(--fg);
-    text-decoration: none;
-    font-size: 0.9rem;
-    transition: border-color 0.15s, color 0.15s;
+  .buttons :global(.btn) {
+    padding: 0.7rem 1.75rem;
+    font-size: 1.00rem;
+    border-radius: 7px;
   }
-  .btn:hover {
-    border-color: var(--accent);
-    color: var(--accent);
+  .snippet {
+    grid-area: snippet;
+    max-width: 380px;
+    background-color: #e0cfa7;
+    background-image:
+      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' seed='4'/><feColorMatrix values='0 0 0 0 0.2  0 0 0 0 0.15  0 0 0 0 0.08  0 0 0 0.18 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>"),
+      radial-gradient(ellipse at top left, rgba(255, 240, 210, 0.35), transparent 60%),
+      radial-gradient(ellipse at bottom right, rgba(140, 110, 70, 0.22), transparent 55%);
+    color: #2b2a27;
+    padding: 1.5rem 1.25rem 1rem;
+    font-family: "Caveat", Georgia, "Times New Roman", serif;
+    font-size: 1.625rem;
+    font-weight: 500;
+    line-height: 1.35;
+    transform: rotate(-1.2deg);
+    box-shadow:
+      3px 5px 14px rgba(0, 0, 0, 0.38),
+      inset 0 0 40px rgba(120, 90, 50, 0.15);
+    border-radius: 2px;
+    margin-top: 2rem;
+    position: relative;
   }
-  .btn-primary {
-    background: linear-gradient(180deg, #e8b931, #d4872e);
-    border-color: #c47a28;
-    color: #0d1117;
-    font-weight: 700;
+  .snippet::before,
+  .snippet::after {
+    content: '';
+    position: absolute;
+    width: 77px;
+    height: 24px;
+    background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.35) 0%,
+      rgba(240, 240, 240, 0.45) 50%,
+      rgba(220, 220, 220, 0.3) 100%
+    );
+    mix-blend-mode: screen;
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.18));
+    clip-path: polygon(
+      0% 0%, 100% 0%,
+      95% 16%, 100% 32%, 94% 48%, 100% 64%, 95% 80%, 100% 100%,
+      0% 100%,
+      5% 84%, 0% 68%, 6% 52%, 0% 36%, 5% 20%
+    );
+    z-index: 2;
   }
-  .btn-primary:hover {
-    background: linear-gradient(180deg, #f0c63d, #dc9233);
-    border-color: #ffffff;
-    color: #0d1117;
+  .snippet::before {
+    top: -13px;
+    left: -25px;
+    transform: rotate(-38deg);
+  }
+  .snippet::after {
+    bottom: -13px;
+    right: -25px;
+    transform: rotate(-38deg);
+  }
+  .snippet p {
+    margin: 0;
+  }
+  .snippet a {
+    color: #0858c0;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .snippet a:hover {
+    color: #05458f;
+  }
+  .snippet mark {
+    background: linear-gradient(
+      100deg,
+      rgba(255, 155, 50, 0) 0%,
+      rgba(255, 155, 50, 0.7) 5%,
+      rgba(255, 160, 60, 0.8) 45%,
+      rgba(255, 170, 50, 0.78) 75%,
+      rgba(255, 155, 50, 0.7) 94%,
+      rgba(255, 155, 50, 0) 100%
+    );
+    color: #4a2818;
+    padding: 0.05em 0.2em;
+    mix-blend-mode: darken;
+    display: inline-block;
+    transform: rotate(-1.5deg);
+    transform-origin: center;
+  }
+  @media (max-width: 880px) {
+    main {
+      padding-top: 0;
+    }
+    .cta {
+      margin-top: 10px;
+    }
+    .hero {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1.5rem;
+      position: relative;
+    }
+    .brand-banner {
+      display: block;
+      width: 100%;
+      padding: 0 0 max(6px, 1.6vw) 0;
+      border-top: 2px solid #b8552a;
+      border-bottom: 2px solid #b8552a;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+      position: relative;
+      background-image:
+        url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='bn'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' seed='3'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.05 0'/></filter><rect width='100%' height='100%' filter='url(%23bn)'/></svg>"),
+        linear-gradient(180deg, #e8b931, #d4872e);
+    }
+    .brand-banner-inner {
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      width: 100%;
+      padding: 0;
+      position: relative;
+      line-height: 0;
+    }
+    .brand-letters {
+      display: block;
+      width: auto;
+      height: clamp(32px, 8vw, 72px);
+      object-fit: contain;
+      margin-top: 10px;
+    }
+    .brand-trifoil {
+      display: block;
+      width: auto;
+      height: clamp(35px, 8.8vw, 77px);
+      object-fit: contain;
+      position: absolute;
+      right: 0;
+      top: 5px;
+    }
+    .brand-tagline {
+      position: absolute;
+      left: 0.5rem;
+      top: 50%;
+      transform: translateY(-50%);
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+      font-weight: 700;
+      font-size: clamp(12px, 2.86vw, 24px);
+      line-height: 1;
+      color: #fff;
+      letter-spacing: -0.02em;
+      text-transform: uppercase;
+      -webkit-text-stroke: 6px #161616;
+      paint-order: stroke fill;
+    }
+    .brand-tagline span {
+      display: block;
+    }
+    .sticker-link {
+      display: none;
+    }
+    .logo {
+      display: none;
+      width: 112%;
+      max-width: 560px;
+      height: auto;
+      border-radius: 0;
+      z-index: 0;
+      pointer-events: none;
+      align-self: center;
+      margin-bottom: -20vh;
+      mask-image: linear-gradient(
+        to bottom,
+        #000 30%,
+        transparent 80%
+      );
+      -webkit-mask-image: linear-gradient(
+        to bottom,
+        #000 30%,
+        transparent 80%
+      );
+    }
+    .cta,
+    .snippet {
+      position: relative;
+      z-index: 1;
+    }
   }
 </style>
-
-<script>
-  const btn = document.querySelector('.copy-btn')!;
-  const code = document.getElementById('install-cmd')!;
-  btn.addEventListener('click', () => {
-    navigator.clipboard.writeText(code.textContent!);
-    btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M13.78 4.22a.75.75 0 010 1.06l-7.25 7.25a.75.75 0 01-1.06 0L2.22 9.28a.75.75 0 011.06-1.06L6 10.94l6.72-6.72a.75.75 0 011.06 0z"/></svg>';
-    setTimeout(() => {
-      btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25z"/><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-7.5a.25.25 0 00-.25-.25z"/></svg>';
-    }, 2000);
-  });
-</script>

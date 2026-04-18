@@ -1,0 +1,100 @@
+---
+---
+<div class="transcript">
+  <a class="transcript-label" href="#">Prefer reading? Here's the transcript.</a>
+  <div class="transcript-preview">
+    <slot name="preview" />
+  </div>
+  <div class="transcript-full">
+    <slot name="full" />
+  </div>
+  <button class="show-more">Show more</button>
+</div>
+
+<style>
+  .transcript {
+    width: 100%;
+    text-align: left;
+  }
+  .transcript-label {
+    display: inline-block;
+    color: #58a6ff;
+    font-size: 1.2rem;
+    margin-bottom: 1rem;
+    text-decoration: underline;
+    cursor: pointer;
+    transition: opacity 0.15s;
+  }
+  .transcript-label:hover {
+    opacity: 0.8;
+  }
+  .transcript-preview {
+    position: relative;
+    max-height: 5.4rem;
+    overflow: hidden;
+  }
+  .transcript.expanded .transcript-preview {
+    max-height: none;
+    overflow: visible;
+  }
+  .transcript-preview::after {
+    content: "";
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 5rem;
+    background: linear-gradient(transparent, var(--bg));
+    pointer-events: none;
+    transition: opacity 0.15s;
+  }
+  .transcript.expanded .transcript-preview::after {
+    opacity: 0;
+  }
+  .transcript-preview :global(p),
+  .transcript-full :global(p) {
+    color: var(--muted);
+    font-size: 1.08rem;
+    line-height: 1.6;
+    margin-bottom: 0.75rem;
+    text-indent: 2rem;
+  }
+  .transcript-full {
+    display: none;
+  }
+  .transcript.expanded .transcript-full {
+    display: block;
+  }
+  .show-more {
+    background: none;
+    border: none;
+    color: var(--muted);
+    font-size: 0.8rem;
+    cursor: pointer;
+    padding: 0;
+    transition: color 0.15s;
+  }
+  .show-more:hover {
+    color: var(--fg);
+  }
+</style>
+
+<script>
+  document.querySelectorAll('.transcript').forEach((transcript) => {
+    const btn = transcript.querySelector('.show-more') as HTMLButtonElement;
+    const label = transcript.querySelector('.transcript-label') as HTMLAnchorElement;
+    const preview = transcript.querySelector('.transcript-preview') as HTMLElement;
+
+    const toggle = () => {
+      const expanded = transcript.classList.toggle('expanded');
+      btn.textContent = expanded ? 'Show less' : 'Show more';
+    };
+
+    btn.addEventListener('click', toggle);
+    label.addEventListener('click', (e) => {
+      e.preventDefault();
+      toggle();
+      preview.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+</script>

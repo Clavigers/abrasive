@@ -1,0 +1,72 @@
+---
+layout: ../layouts/Base.astro
+title: "abrasive - demo"
+---
+import Transcript from '../components/Transcript.astro';
+import Button from '../components/Button.astro';
+
+<main>
+  # See it in action
+
+  <div class="video-wrap">
+    <iframe
+      src="https://www.youtube.com/embed/dQw4w9WgXcQ"
+      title="Abrasive Demo"
+      frameborder="0"
+      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+      allowfullscreen
+    ></iframe>
+  </div>
+
+  <Transcript>
+    <Fragment slot="preview">
+      So what we're looking at here is a fresh install of askdhasidhaskdhlas thing we do is pull down the config — takes about two seconds — and you can already see it's picked up the project structure automatically. No manual setup, no boilerplate, nothing.
+
+      Now watch what happens when I run the first pass. It scans everything, builds a dependency graph, and just... goes. The whole pipeline resolves in under a second. That's not cached either, that's a cold run.
+    </Fragment>
+    <Fragment slot="full">
+      Let's look at what actually happened under the hood. Each node in the graph was evaluated in parallel where possible. The resolver figured out the optimal order, batched what it could, and streamed the rest. You're not waiting on anything sequential unless it genuinely has to be.
+
+      And here's the part I really want to show — watch this. I'm going to change one file. Just one. See how it only re-evaluates the affected subgraph? Everything else is untouched. That's incremental resolution at work.
+
+      The feedback loop is basically instant. Change, resolve, done. You're never sitting around wondering what's happening. And if something does break, the error output tells you exactly which node failed and why. No stack trace archaeology.
+
+      That's pretty much it. Install it, point it at your project, and let it rip. The whole thing is designed to get out of your way.
+    </Fragment>
+  </Transcript>
+
+  <div class="cta">
+    <Button href="/getting-started" primary>Get Started</Button>
+  </div>
+</main>
+
+<style>{`
+  main {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2rem;
+    max-width: 720px;
+    width: 100%;
+    padding-bottom: 4rem;
+  }
+  h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+  .video-wrap {
+    width: 80%;
+    aspect-ratio: 16 / 9;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+  }
+  .video-wrap iframe {
+    width: 100%;
+    height: 100%;
+  }
+  .cta {
+    padding-top: 0.5rem;
+  }
+`}</style>

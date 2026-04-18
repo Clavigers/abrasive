@@ -1,0 +1,82 @@
+---
+layout: ../layouts/Base.astro
+title: "abrasive - get started"
+---
+import CodeBlock from '../components/CodeBlock.astro';
+import InstallCommand from '../components/InstallCommand.astro';
+
+<main>
+  <section class="step">
+    ## If you haven't already, install abrasive
+    <InstallCommand />
+  </section>
+
+  <section class="step" id="alias">
+    ## Set up a cargo alias <span class="optional">(optional)</span>
+
+    Command line compatible with Cargo. Alias `cargo=abrasive` and keep using cargo the way you normally would.
+
+    Add an alias to your shell config:
+
+    <CodeBlock code={`echo 'alias cargo="abrasive"' >> ~/.bashrc && source ~/.bashrc`} />
+
+    For zsh, replace `~/.bashrc` with `~/.zshrc`. For fish:
+
+    <CodeBlock code={`alias --save cargo="abrasive"`} />
+
+    Now `cargo setup`, `cargo build`, etc. will all route through abrasive.
+  </section>
+
+  <section class="step">
+    ## Initialize your project
+
+    Navigate to the root of your project and run:
+
+    <CodeBlock code="abrasive setup" />
+
+    Or if you set up the cargo alias:
+
+    <CodeBlock code="cargo setup" />
+
+    This walks you through an interactive setup and creates an `abrasive.toml` in the root of your project.
+  </section>
+</main>
+
+<style>{`
+  main {
+    display: flex;
+    flex-direction: column;
+    gap: 3rem;
+    max-width: 720px;
+    width: 100%;
+    align-items: flex-start;
+    padding-bottom: 4rem;
+  }
+  .step {
+    width: 100%;
+  }
+  h2 {
+    font-size: 1.4rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+  }
+  .optional {
+    color: var(--muted);
+    font-weight: 400;
+    font-size: 0.9rem;
+  }
+  p {
+    color: var(--fg);
+    font-size: 0.95rem;
+    line-height: 1.6;
+    margin-bottom: 0.75rem;
+  }
+  p code {
+    color: var(--accent);
+    background: var(--code-bg);
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.85em;
+  }
+`}</style>
