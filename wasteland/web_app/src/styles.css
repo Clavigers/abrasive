@@ -67,6 +67,144 @@ p { color: var(--muted); margin: 0; }
 
 .gh-btn:hover { background: #32383f; }
 
+.ferris {
+  font-size: 3rem;
+  line-height: 1;
+}
+
+.page {
+  flex: 1;
+  max-width: 920px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.page-header h1 {
+  font-size: 1.5rem;
+}
+
+.muted { color: var(--muted); }
+
+.error {
+  padding: 0.75rem 1rem;
+  background: rgba(200, 60, 60, 0.15);
+  border: 1px solid rgba(200, 60, 60, 0.4);
+  border-radius: 6px;
+  color: #ff9e9e;
+  font-size: 0.9rem;
+}
+
+.primary-btn {
+  background: rgb(11, 138, 15);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.primary-btn:hover:not(:disabled) { background: rgb(60, 175, 55); }
+.primary-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.link-btn {
+  background: transparent;
+  color: #7aa2f7;
+  border: none;
+  padding: 0.25rem 0;
+  font-size: 0.9rem;
+  cursor: pointer;
+  text-decoration: none;
+  font-family: inherit;
+}
+.link-btn:hover { text-decoration: underline; }
+.link-btn.danger { color: #ff9e9e; }
+
+.token-form {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.token-form input {
+  flex: 1;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.9rem;
+  font-family: inherit;
+}
+.token-form input:focus {
+  outline: none;
+  border-color: #3d4454;
+}
+
+.created-banner {
+  padding: 1rem;
+  background: rgba(11, 138, 15, 0.12);
+  border: 1px solid rgba(11, 138, 15, 0.4);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.created-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.token-display {
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.85rem;
+  background: var(--bg);
+  color: var(--fg);
+  padding: 0.6rem 0.75rem;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  word-break: break-all;
+  user-select: all;
+}
+
+.token-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+.token-table th, .token-table td {
+  text-align: left;
+  padding: 0.6rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+.token-table th {
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.token-table code {
+  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
 .topbar {
   display: flex;
   align-items: center;
