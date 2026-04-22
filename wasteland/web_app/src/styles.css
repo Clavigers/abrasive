@@ -255,7 +255,7 @@ p { color: var(--muted); margin: 0; }
 .token-card {
   padding: 1rem 0;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   gap: 0.5rem;
   border-bottom: 1px solid var(--border);
 }
