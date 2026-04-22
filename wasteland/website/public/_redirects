@@ -1,1 +1,4 @@
+/me  /dashboard/me  302
+/settings/tokens  /dashboard/settings/tokens  302
+/sign-in  /dashboard/sign-in  302
 /dashboard/*  /dashboard/index.html  200

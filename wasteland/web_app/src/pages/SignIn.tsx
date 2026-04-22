@@ -2,8 +2,9 @@ import { supabase } from '../lib/supabase'
 
 export default function SignIn() {
   const signIn = () => {
-    const next = new URLSearchParams(window.location.search).get('next')
-    const redirectTo = window.location.origin + (next || '/dashboard')
+    const base = import.meta.env.BASE_URL.replace(/\/$/, '')
+    const next = new URLSearchParams(window.location.search).get('next') ?? '/'
+    const redirectTo = window.location.origin + base + next
     supabase.auth.signInWithOAuth({
       provider: 'github',
       options: { redirectTo },
