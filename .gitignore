@@ -2,3 +2,4 @@ target/
 *.key
 .env
 dist/
+node_modules/
