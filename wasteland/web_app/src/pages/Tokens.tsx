@@ -226,16 +226,6 @@ export default function Tokens({ session }: Props) {
                   <div className="token-card-header">
                     <h3>{t.name}</h3>
                   </div>
-                  <div className="token-card-meta">
-                    <span>Scope: {t.scope}</span>
-                    <span>
-                      {t.last_used_at
-                        ? `Last used ${relativeTimePast(t.last_used_at)} ago`
-                        : 'Never used'}
-                    </span>
-                    <span>Created {relativeTimePast(t.created_at)} ago</span>
-                    <span>{expirationText(t.expires_at)}</span>
-                  </div>
 
                   {isNew && justCreated && (
                     <div className="just-created">
@@ -247,21 +237,33 @@ export default function Tokens({ session }: Props) {
                     </div>
                   )}
 
-                  <div className="token-card-actions">
-                    <button
-                      className="primary-btn"
-                      onClick={() => onRegenerate(t)}
-                      disabled={busy}
-                    >
-                      Regenerate
-                    </button>
-                    <button
-                      className="danger-btn"
-                      onClick={() => onDelete(t)}
-                      disabled={busy}
-                    >
-                      Revoke
-                    </button>
+                  <div className="token-card-row">
+                    <div className="token-card-meta">
+                      <span>Scope: {t.scope}</span>
+                      <span>
+                        {t.last_used_at
+                          ? `Last used ${relativeTimePast(t.last_used_at)} ago`
+                          : 'Never used'}
+                      </span>
+                      <span>Created {relativeTimePast(t.created_at)} ago</span>
+                      <span>{expirationText(t.expires_at)}</span>
+                    </div>
+                    <div className="token-card-actions">
+                      <button
+                        className="primary-btn"
+                        onClick={() => onRegenerate(t)}
+                        disabled={busy}
+                      >
+                        Regenerate
+                      </button>
+                      <button
+                        className="danger-btn"
+                        onClick={() => onDelete(t)}
+                        disabled={busy}
+                      >
+                        Revoke
+                      </button>
+                    </div>
                   </div>
                 </li>
               )
