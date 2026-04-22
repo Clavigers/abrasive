@@ -7,54 +7,12 @@ import {
   deleteToken,
   listTokens,
   regenerateToken,
-  regenerateToken,
   type CreatedToken,
   type PublicToken,
-  type Scope,
   type Scope,
 } from '../lib/tokens'
 
 type Props = { session: Session }
-
-const EXPIRATION_OPTIONS: Array<{ label: string; days: number | null }> = [
-  { label: '30 days', days: 30 },
-  { label: '90 days', days: 90 },
-  { label: '1 year', days: 365 },
-  { label: 'Never', days: null },
-]
-
-function formatDuration(ms: number): string {
-  const abs = Math.abs(ms)
-  const mins = abs / 60_000
-  const hours = mins / 60
-  const days = hours / 24
-  const months = days / 30.4
-  const years = days / 365
-
-  if (mins < 1) return 'less than a minute'
-  const round = (n: number, unit: string) =>
-    `${Math.round(n)} ${unit}${Math.round(n) === 1 ? '' : 's'}`
-  if (mins < 60) return round(mins, 'minute')
-  if (hours < 24) return round(hours, 'hour')
-  if (days < 30) return round(days, 'day')
-  if (months < 12) return round(months, 'month')
-  return round(years, 'year')
-}
-
-function relativeTimePast(when: string): string {
-  return formatDuration(Date.now() - new Date(when).getTime())
-}
-
-function expirationText(expires_at: string | null): string {
-  if (!expires_at) return 'Never expires'
-  const diff = new Date(expires_at).getTime() - Date.now()
-  if (diff < 0) return `Expired ${formatDuration(-diff)} ago`
-  return `Expires in ${formatDuration(diff)}`
-}
-
-function daysFromNow(days: number): Date {
-  return new Date(Date.now() + days * 24 * 60 * 60 * 1000)
-}
 
 const EXPIRATION_OPTIONS: Array<{ label: string; days: number | null }> = [
   { label: '30 days', days: 30 },
@@ -104,9 +62,6 @@ export default function Tokens({ session }: Props) {
   const [scope, setScope] = useState<Scope>('read-write')
   const [expirationDays, setExpirationDays] = useState<number | null>(365)
   const [busy, setBusy] = useState(false)
-  const [scope, setScope] = useState<Scope>('read-write')
-  const [expirationDays, setExpirationDays] = useState<number | null>(365)
-  const [busy, setBusy] = useState(false)
   const [justCreated, setJustCreated] = useState<CreatedToken | null>(null)
 
   const refresh = async () => {
@@ -123,11 +78,8 @@ export default function Tokens({ session }: Props) {
     e.preventDefault()
     if (!name.trim()) return
     setBusy(true)
-    setBusy(true)
     setError(null)
     try {
-      const expiresAt = expirationDays === null ? null : daysFromNow(expirationDays)
-      const result = await createToken(name.trim(), scope, expiresAt)
       const expiresAt = expirationDays === null ? null : daysFromNow(expirationDays)
       const result = await createToken(name.trim(), scope, expiresAt)
       setJustCreated(result)
@@ -138,39 +90,18 @@ export default function Tokens({ session }: Props) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setBusy(false)
-      setBusy(false)
     }
   }
 
   const onDelete = async (t: PublicToken) => {
     if (!confirm(`Revoke "${t.name}"? CLIs using it will stop working.`)) return
     setError(null)
-  const onDelete = async (t: PublicToken) => {
-    if (!confirm(`Revoke "${t.name}"? CLIs using it will stop working.`)) return
-    setError(null)
     try {
-      await deleteToken(t.id)
-      if (justCreated?.row.id === t.id) setJustCreated(null)
       await deleteToken(t.id)
       if (justCreated?.row.id === t.id) setJustCreated(null)
       await refresh()
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
-    }
-  }
-
-  const onRegenerate = async (t: PublicToken) => {
-    if (!confirm(`Regenerate "${t.name}"? The old key stops working immediately.`)) return
-    setBusy(true)
-    setError(null)
-    try {
-      const result = await regenerateToken(t)
-      setJustCreated(result)
-      await refresh()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setBusy(false)
     }
   }
 
@@ -199,33 +130,9 @@ export default function Tokens({ session }: Props) {
             <button className="primary-btn" onClick={() => setShowForm(true)} disabled={busy}>
               New Token
             </button>
-          {!showForm && (
-            <button className="primary-btn" onClick={() => setShowForm(true)} disabled={busy}>
-              New Token
-            </button>
           )}
         </header>
 
-        <div className="token-description">
-          <p>
-            You can use the API tokens generated on this page to run abrasive CLI
-            commands that authenticate with the build server. If you want to run
-            abrasive builds then this is required.
-          </p>
-          <p>
-            To prevent keys being silently leaked they are stored on abrasive in
-            hashed form. This means you can only download keys when you first
-            create them. If you have old unused keys you can safely delete them
-            and create a new one.
-          </p>
-          <p>
-            To use an API token, run <code>abrasive auth</code> on the command
-            line and paste the key when prompted. This will save it to a local
-            credentials file. For CI systems you can use the{' '}
-            <code>ABRASIVE_TOKEN</code> environment variable, but make sure that
-            the token stays secret!
-          </p>
-        </div>
         <div className="token-description">
           <p>
             You can use the API tokens generated on this page to run abrasive CLI
@@ -300,61 +207,8 @@ export default function Tokens({ session }: Props) {
                 Cancel
               </button>
             </div>
-            <label className="field">
-              <span>Name</span>
-              <input
-                type="text"
-                placeholder="e.g. work-laptop"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                autoFocus
-                disabled={busy}
-              />
-            </label>
-            <label className="field">
-              <span>Scope</span>
-              <select
-                value={scope}
-                onChange={(e) => setScope(e.target.value as Scope)}
-                disabled={busy}
-              >
-                <option value="read-write">read-write</option>
-                <option value="read">read</option>
-              </select>
-            </label>
-            <label className="field">
-              <span>Expires</span>
-              <select
-                value={expirationDays === null ? 'never' : String(expirationDays)}
-                onChange={(e) =>
-                  setExpirationDays(e.target.value === 'never' ? null : Number(e.target.value))
-                }
-                disabled={busy}
-              >
-                {EXPIRATION_OPTIONS.map((o) => (
-                  <option key={o.label} value={o.days === null ? 'never' : String(o.days)}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="form-actions">
-              <button type="submit" className="primary-btn" disabled={busy || !name.trim()}>
-                {busy ? 'Creating…' : 'Create'}
-              </button>
-              <button
-                type="button"
-                className="link-btn"
-                onClick={() => setShowForm(false)}
-                disabled={busy}
-              >
-                Cancel
-              </button>
-            </div>
           </form>
         )}
-
-        {error && <div className="error">{error}</div>}
 
         {error && <div className="error">{error}</div>}
 

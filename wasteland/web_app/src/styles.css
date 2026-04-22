@@ -207,25 +207,10 @@ p { color: var(--muted); margin: 0; }
   flex-direction: column;
   gap: 0.75rem;
   padding: 1rem;
-  flex-direction: column;
-  gap: 0.75rem;
-  padding: 1rem;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 6px;
 }
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-}
-.field > span {
-  font-size: 0.82rem;
-  color: var(--muted);
-  font-weight: 500;
-}
-.token-form input,
-.token-form select {
 .field {
   display: flex;
   flex-direction: column;
@@ -246,8 +231,6 @@ p { color: var(--muted); margin: 0; }
   font-size: 0.9rem;
   font-family: inherit;
 }
-.token-form input:focus,
-.token-form select:focus {
 .token-form input:focus,
 .token-form select:focus {
   outline: none;
@@ -272,6 +255,7 @@ p { color: var(--muted); margin: 0; }
 .token-card {
   padding: 1rem 0;
   display: flex;
+  flex-direction: column;
   gap: 0.5rem;
   border-bottom: 1px solid var(--border);
 }
@@ -408,7 +392,6 @@ p { color: var(--muted); margin: 0; }
   letter-spacing: -0.01em;
   color: var(--fg);
   text-decoration: none;
-  text-decoration: none;
 }
 .topbar-right {
   position: relative;
@@ -476,7 +459,6 @@ p { color: var(--muted); margin: 0; }
 
 .avatar-menu-item {
   display: block;
-  display: block;
   width: 100%;
   text-align: left;
   background: transparent;
@@ -485,8 +467,6 @@ p { color: var(--muted); margin: 0; }
   padding: 8px 12px;
   font-size: 0.9rem;
   cursor: pointer;
-  font-family: inherit;
-  text-decoration: none;
   font-family: inherit;
   text-decoration: none;
 }
