@@ -66,10 +66,40 @@ p { color: var(--muted); margin: 0; }
 }
 .gh-btn:hover { background: #32383f; }
 
-.ferris {
-  font-size: 3rem;
-  line-height: 1;
+.auth-wrapper {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 2rem;
 }
+.auth-content {
+  display: grid;
+  place-items: center;
+  gap: 1.25rem;
+  text-align: center;
+}
+.auth-logo {
+  max-width: 200px;
+  width: 100%;
+  height: auto;
+}
+.auth-title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  margin: 0;
+}
+.auth-link {
+  background: transparent;
+  border: none;
+  color: #7aa2f7;
+  font-weight: 500;
+  font-size: 1rem;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+}
+.auth-link:hover { text-decoration: underline; }
+.auth-link:disabled { color: var(--muted); cursor: wait; }
 
 .page {
   flex: 1;
