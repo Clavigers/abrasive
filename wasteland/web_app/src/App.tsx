@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from './lib/supabase'
-import { useRoute, navigate } from './router'
+import { useRoute, navigate, href } from './router'
 import TopBar from './TopBar'
 import SignIn from './pages/SignIn'
 import Me from './pages/Me'
@@ -48,7 +48,7 @@ export default function App() {
       <TopBar session={session} />
       <main className="dash">
         <h1>Hello, {name}</h1>
-        <a className="link-btn" href="/settings/tokens" onClick={(e) => { e.preventDefault(); navigate('/settings/tokens') }}>
+        <a className="link-btn" href={href('/settings/tokens')} onClick={(e) => { e.preventDefault(); navigate('/settings/tokens') }}>
           API tokens →
         </a>
       </main>
