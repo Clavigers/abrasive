@@ -3,6 +3,7 @@ import type { Session } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import { navigate } from '../router'
 import TopBar from '../TopBar'
+import Footer from '../Footer'
 import cuddlyferris from '../assets/cuddlyferris.svg'
 
 export default function SignIn() {
@@ -48,6 +49,7 @@ export default function SignIn() {
           </button>
         </div>
       </main>
+      <Footer />
     </div>
   )
 }
