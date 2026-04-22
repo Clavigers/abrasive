@@ -1,11 +1,15 @@
 import { supabase } from './supabase'
 
+export type Scope = 'read' | 'read-write'
+
 export type PublicToken = {
   id: string
   user_id: string
   name: string
   prefix: string
+  scope: Scope
   created_at: string
+  expires_at: string | null
   last_used_at: string | null
 }
 
@@ -28,7 +32,11 @@ const sha256Hex = async (input: string) => {
 
 export type CreatedToken = { plaintext: string; row: PublicToken }
 
-export async function createToken(name: string): Promise<CreatedToken> {
+export async function createToken(
+  name: string,
+  scope: Scope,
+  expiresAt: Date | null,
+): Promise<CreatedToken> {
   const { data: sessionData } = await supabase.auth.getSession()
   const userId = sessionData.session?.user.id
   if (!userId) throw new Error('not signed in')
@@ -41,12 +49,30 @@ export async function createToken(name: string): Promise<CreatedToken> {
 
   const { data, error } = await supabase
     .from('api_tokens')
-    .insert({ user_id: userId, name, token_hash, prefix })
-    .select('id, user_id, name, prefix, created_at, last_used_at')
+    .insert({
+      user_id: userId,
+      name,
+      token_hash,
+      prefix,
+      scope,
+      expires_at: expiresAt?.toISOString() ?? null,
+    })
+    .select('id, user_id, name, prefix, scope, created_at, expires_at, last_used_at')
     .single()
 
   if (error) throw error
   return { plaintext, row: data as PublicToken }
+}
+
+export async function regenerateToken(old: PublicToken): Promise<CreatedToken> {
+  let newExpiresAt: Date | null = null
+  if (old.expires_at) {
+    const originalDuration =
+      new Date(old.expires_at).getTime() - new Date(old.created_at).getTime()
+    newExpiresAt = new Date(Date.now() + originalDuration)
+  }
+  await deleteToken(old.id)
+  return createToken(old.name, old.scope, newExpiresAt)
 }
 
 export async function listTokens(): Promise<PublicToken[]> {

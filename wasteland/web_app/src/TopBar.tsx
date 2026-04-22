@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from './lib/supabase'
+import { navigate } from './router'
 
 type Props = { session: Session }
 
@@ -28,10 +29,16 @@ export default function TopBar({ session }: Props) {
     session.user.id
   const initial = (username[0] || '?').toUpperCase()
 
+  const goTo = (path: string) => (e: React.MouseEvent) => {
+    e.preventDefault()
+    setMenuOpen(false)
+    navigate(path)
+  }
+
   return (
     <header className="topbar">
       <div className="topbar-left">
-        <span className="topbar-brand">abrasive</span>
+        <a className="topbar-brand" href="/" onClick={goTo('/')}>abrasive</a>
       </div>
       <div className="topbar-right" ref={menuRef}>
         <button
@@ -54,6 +61,14 @@ export default function TopBar({ session }: Props) {
                 <div className="avatar-menu-email">{session.user.email}</div>
               )}
             </div>
+            <a
+              className="avatar-menu-item"
+              role="menuitem"
+              href="/settings/tokens"
+              onClick={goTo('/settings/tokens')}
+            >
+              API tokens
+            </a>
             <button
               className="avatar-menu-item"
               role="menuitem"
