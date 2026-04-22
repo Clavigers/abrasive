@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabase'
 import { navigate } from '../router'
+import TopBar from '../TopBar'
+import Footer from '../Footer'
 import cuddlyferris from '../assets/cuddlyferris.svg'
 
 export default function SignIn() {
@@ -36,14 +38,18 @@ export default function SignIn() {
   if (session) return <main className="gate"><p>Redirecting…</p></main>
 
   return (
-    <main className="auth-wrapper">
-      <div className="auth-content">
-        <img src={cuddlyferris} alt="" className="auth-logo" />
-        <h1 className="auth-title">This page requires authentication</h1>
-        <button className="auth-link" onClick={signIn}>
-          Log in with GitHub
-        </button>
-      </div>
-    </main>
+    <div className="app">
+      <TopBar session={null} />
+      <main className="auth-wrapper">
+        <div className="auth-content">
+          <img src={cuddlyferris} alt="" className="auth-logo" />
+          <h1 className="auth-title">This page requires authentication</h1>
+          <button className="auth-link" onClick={signIn}>
+            Log in with GitHub
+          </button>
+        </div>
+      </main>
+      <Footer />
+    </div>
   )
 }

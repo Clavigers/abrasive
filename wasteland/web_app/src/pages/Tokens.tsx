@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import TopBar from '../TopBar'
+import Footer from '../Footer'
 import CodeBlock from '../components/CodeBlock'
 import {
   createToken,
@@ -268,6 +269,7 @@ export default function Tokens({ session }: Props) {
           </ul>
         )}
       </main>
+      <Footer />
     </div>
   )
 }
