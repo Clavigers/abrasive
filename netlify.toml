@@ -1,4 +1,7 @@
 [build]
-  base = "wasteland/website"
-  command = "bunx --bun astro build"
-  publish = "dist"
+  base = "wasteland"
+  command = "cd web_app && bun install --frozen-lockfile && bun run build && cd ../website && bun install --frozen-lockfile && bun run build && cd .. && mkdir -p website/dist/dashboard && cp -r web_app/dist/. website/dist/dashboard/"
+  publish = "website/dist"
+
+[build.environment]
+  NODE_VERSION = "20"

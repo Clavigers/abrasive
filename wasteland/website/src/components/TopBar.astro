@@ -1,6 +1,7 @@
 ---
 import { Image } from 'astro:assets';
 import abrasiveLetters from '../AbrasiveLetters.png';
+const appUrl = import.meta.env.PUBLIC_APP_URL ?? '';
 ---
 <header class="topbar">
   <div class="topbar-inner">
@@ -17,9 +18,25 @@ import abrasiveLetters from '../AbrasiveLetters.png';
           <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
         </svg>
       </a>
-      <div class="nav-buttons">
-        <a class="nav-btn nav-btn--signin" href="#" aria-label="Sign in">Sign in</a>
-        <a class="nav-btn nav-btn--signup" href="#" aria-label="Sign up free">Sign up free</a>
+      <div class="nav-buttons" data-auth="signed-out">
+        <a class="nav-btn nav-btn--signin" href={`${appUrl}/dashboard`} aria-label="Sign in">Sign in</a>
+        <a class="nav-btn nav-btn--signup" href={`${appUrl}/dashboard/sign-up`} aria-label="Sign up free">Sign up free</a>
+      </div>
+      <div class="nav-buttons" data-auth="signed-in" hidden>
+        <a class="nav-btn nav-btn--dashboard" href={`${appUrl}/dashboard`}>Dashboard</a>
+        <div class="avatar-wrap">
+          <button class="avatar-btn" aria-label="Account menu" aria-expanded="false">
+            <img class="avatar-img" alt="" />
+            <span class="avatar-fallback">?</span>
+          </button>
+          <div class="avatar-menu" hidden role="menu">
+            <div class="avatar-menu-header">
+              <div class="avatar-menu-username"></div>
+              <div class="avatar-menu-email"></div>
+            </div>
+            <button class="avatar-menu-item avatar-menu-signout" role="menuitem">Sign out</button>
+          </div>
+        </div>
       </div>
     </nav>
   </div>
@@ -86,6 +103,9 @@ import abrasiveLetters from '../AbrasiveLetters.png';
     font-size: 14px;
     letter-spacing: -0.0175em;
   }
+  .nav-buttons[hidden] {
+    display: none;
+  }
   .links a.nav-btn {
     border-radius: 0.25em;
     color: #fff;
@@ -99,13 +119,16 @@ import abrasiveLetters from '../AbrasiveLetters.png';
     white-space: nowrap;
     transition: background 0.1s ease, box-shadow 0.1s ease;
   }
-  .nav-btn--signin {
+  .nav-btn--signin,
+  .nav-btn--dashboard {
     box-shadow:
       0 0 0 1px rgba(255, 255, 255, 0.18),
       0 0 0.1em 0.02em rgba(0, 0, 0, 0.05);
   }
   .nav-btn--signin:hover,
-  .nav-btn--signin:focus {
+  .nav-btn--signin:focus,
+  .nav-btn--dashboard:hover,
+  .nav-btn--dashboard:focus {
     box-shadow:
       0 0 0 1px rgba(255, 255, 255, 0.85),
       0 0 0.1em 0.02em rgba(0, 0, 0, 0.05);
@@ -119,6 +142,94 @@ import abrasiveLetters from '../AbrasiveLetters.png';
   .links a.nav-btn--signup:focus {
     background: rgb(60, 175, 55);
     color: #fff;
+  }
+  .avatar-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+  }
+  .avatar-btn {
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    cursor: pointer;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: border-color 0.15s;
+  }
+  .avatar-btn:hover,
+  .avatar-btn[aria-expanded="true"] {
+    border-color: rgba(255, 255, 255, 0.45);
+  }
+  .avatar-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .avatar-img:not([src]),
+  .avatar-img[src=""] {
+    display: none;
+  }
+  .avatar-fallback {
+    color: #fff;
+    font-weight: 600;
+    font-size: 0.85rem;
+  }
+  .avatar-img[src]:not([src=""]) + .avatar-fallback {
+    display: none;
+  }
+  .avatar-menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    min-width: 220px;
+    background: #0d1117;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    padding: 6px 0;
+    z-index: 60;
+  }
+  .avatar-menu[hidden] {
+    display: none;
+  }
+  .avatar-menu-header {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 6px;
+  }
+  .avatar-menu-username {
+    color: var(--fg);
+    font-weight: 500;
+    font-size: 0.9rem;
+  }
+  .avatar-menu-email {
+    color: var(--muted);
+    font-size: 0.8rem;
+    margin-top: 2px;
+  }
+  .avatar-menu-email:empty {
+    display: none;
+  }
+  .avatar-menu-item {
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: none;
+    color: var(--fg);
+    padding: 8px 12px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .avatar-menu-item:hover {
+    background: rgba(255, 255, 255, 0.05);
   }
   @media (max-width: 600px) {
     .topbar-inner {
@@ -137,3 +248,79 @@ import abrasiveLetters from '../AbrasiveLetters.png';
     }
   }
 </style>
+
+<script>
+  import { createClient, type Session } from '@supabase/supabase-js';
+
+  const supabase = createClient(
+    import.meta.env.PUBLIC_SUPABASE_URL,
+    import.meta.env.PUBLIC_SUPABASE_ANON_KEY
+  );
+
+  const signedOut = document.querySelector<HTMLElement>('[data-auth="signed-out"]');
+  const signedIn = document.querySelector<HTMLElement>('[data-auth="signed-in"]');
+  const avatarWrap = signedIn?.querySelector<HTMLElement>('.avatar-wrap');
+  const avatarBtn = signedIn?.querySelector<HTMLButtonElement>('.avatar-btn');
+  const avatarImg = signedIn?.querySelector<HTMLImageElement>('.avatar-img');
+  const avatarFallback = signedIn?.querySelector<HTMLElement>('.avatar-fallback');
+  const avatarMenu = signedIn?.querySelector<HTMLElement>('.avatar-menu');
+  const usernameEl = signedIn?.querySelector<HTMLElement>('.avatar-menu-username');
+  const emailEl = signedIn?.querySelector<HTMLElement>('.avatar-menu-email');
+  const signoutBtn = signedIn?.querySelector<HTMLButtonElement>('.avatar-menu-signout');
+
+  const render = (session: Session | null) => {
+    if (!signedOut || !signedIn) return;
+    if (session?.user) {
+      const meta = (session.user.user_metadata ?? {}) as Record<string, unknown>;
+      const avatarUrl = (meta.avatar_url as string | undefined) ?? '';
+      const username =
+        (meta.user_name as string | undefined) ||
+        (meta.preferred_username as string | undefined) ||
+        session.user.email ||
+        session.user.id;
+      if (avatarImg) {
+        if (avatarUrl) avatarImg.src = avatarUrl;
+        else avatarImg.removeAttribute('src');
+      }
+      if (avatarFallback) avatarFallback.textContent = (username[0] ?? '?').toUpperCase();
+      if (usernameEl) usernameEl.textContent = '@' + username;
+      if (emailEl) emailEl.textContent = session.user.email ?? '';
+      signedOut.hidden = true;
+      signedIn.hidden = false;
+    } else {
+      signedOut.hidden = false;
+      signedIn.hidden = true;
+      closeMenu();
+    }
+  };
+
+  const openMenu = () => {
+    if (!avatarMenu || !avatarBtn) return;
+    avatarMenu.hidden = false;
+    avatarBtn.setAttribute('aria-expanded', 'true');
+  };
+
+  const closeMenu = () => {
+    if (!avatarMenu || !avatarBtn) return;
+    avatarMenu.hidden = true;
+    avatarBtn.setAttribute('aria-expanded', 'false');
+  };
+
+  supabase.auth.getSession().then(({ data }) => render(data.session));
+  supabase.auth.onAuthStateChange((_event, session) => render(session));
+
+  avatarBtn?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (avatarMenu?.hidden) openMenu();
+    else closeMenu();
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!avatarWrap || avatarMenu?.hidden) return;
+    if (!avatarWrap.contains(e.target as Node)) closeMenu();
+  });
+
+  signoutBtn?.addEventListener('click', () => {
+    supabase.auth.signOut();
+  });
+</script>
