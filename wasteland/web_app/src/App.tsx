@@ -3,6 +3,7 @@ import type { Session } from '@supabase/supabase-js'
 import { supabase } from './lib/supabase'
 import { useRoute, navigate, href } from './router'
 import TopBar from './TopBar'
+import Footer from './Footer'
 import SignIn from './pages/SignIn'
 import Me from './pages/Me'
 import Tokens from './pages/Tokens'
@@ -52,6 +53,7 @@ export default function App() {
           API tokens →
         </a>
       </main>
+      <Footer />
     </div>
   )
 }
