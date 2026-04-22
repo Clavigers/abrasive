@@ -67,7 +67,7 @@ p { color: var(--muted); margin: 0; }
 .gh-btn:hover { background: #32383f; }
 
 .auth-wrapper {
-  min-height: 100vh;
+  flex: 1;
   display: grid;
   place-items: center;
   padding: 2rem;
