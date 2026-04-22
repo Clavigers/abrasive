@@ -23,7 +23,13 @@ import InstallCommand from '../components/InstallCommand.astro';
   <main>
     <div class="hero">
       <div class="hero-image">
-        <Image src={abrasiveBlock} alt="ABRASIVE" class="logo" />
+        <div class="logo-wrap">
+          <Image src={abrasiveBlock} alt="ABRASIVE" class="logo" />
+          <div class="logo-tooltip" role="tooltip">
+            <span class="chip">Please excuse my slop</span>
+            If you or someone you know is proficient in 3D software and wants to make an actual 3D model I could use for this, please let me know. I'd be happy to pay a real human artist for a better image!
+          </div>
+        </div>
         <a href="https://www.redbubble.com/" class="sticker-link" aria-label="Stickers" target="_blank" rel="noopener noreferrer">
           <Image src={likeADog} alt="" class="sticker" />
         </a>
@@ -209,6 +215,43 @@ import InstallCommand from '../components/InstallCommand.astro';
     align-items: center;
     gap: 0.75rem;
     position: relative;
+  }
+  .logo-wrap {
+    position: relative;
+  }
+  .logo-tooltip {
+    position: fixed;
+    top: var(--tt-y, 0);
+    left: var(--tt-x, 0);
+    transform: translate(14px, 14px);
+    width: 320px;
+    max-width: calc(100vw - 2rem);
+    padding: 0.75rem 1rem;
+    background: #0d1117;
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 0.85rem;
+    line-height: 1.55;
+    text-align: left;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.12s ease;
+    z-index: 100;
+  }
+  .logo-wrap.tt-show .logo-tooltip {
+    opacity: 1;
+  }
+  .logo-tooltip .chip {
+    display: inline-block;
+    background: #6b111e;
+    color: #fff;
+    padding: 0.15em 0.55em;
+    border-radius: 5px;
+    font-weight: 700;
+    margin-right: 0.35em;
+    white-space: nowrap;
   }
   .logo {
     width: 480px;
@@ -429,3 +472,26 @@ import InstallCommand from '../components/InstallCommand.astro';
     }
   }
 </style>
+
+<script>
+  const LINGER_MS = 300;
+  document.querySelectorAll<HTMLElement>('.logo-wrap').forEach((wrap) => {
+    let timer: number | undefined;
+    const setPos = (x: number, y: number) => {
+      wrap.style.setProperty('--tt-x', `${x}px`);
+      wrap.style.setProperty('--tt-y', `${y}px`);
+    };
+    wrap.addEventListener('mouseenter', (e) => {
+      setPos(e.clientX, e.clientY);
+      clearTimeout(timer);
+      timer = window.setTimeout(() => wrap.classList.add('tt-show'), LINGER_MS);
+    });
+    wrap.addEventListener('mousemove', (e) => {
+      setPos(e.clientX, e.clientY);
+    });
+    wrap.addEventListener('mouseleave', () => {
+      clearTimeout(timer);
+      wrap.classList.remove('tt-show');
+    });
+  });
+</script>

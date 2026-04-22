@@ -49,4 +49,6 @@
 [POLISH] WebSocket Ping/Pong keepalive: tungstenite doesn't auto-pong on the sync API; long builds may need an explicit ping loop or a read timeout policy to detect dead peers (right now we just silently `continue` past Ping/Pong frames)
 [POLISH] Move the agent's "client turn-ender" match (`Message::Probe | Manifest | SyncDone | TipRequest`) onto `Message` itself as a `ends_client_turn()` method in `protocol/src/lib.rs`, so the list lives next to the enum and adding a new turn-ending variant is harder to miss. Callsite in `cli/src/bin/abrasive-agent.rs` proxy loop.
 
+[RUN] Support `cargo run` remotely: capture post-`--` args on the client, send build request, stream built binary back, then exec it locally with the captured args. Use an `If-None-Match`-style protocol to avoid re-shipping unchanged binaries: client includes the hash of its last-cached binary in the build request; after building, remote compares hashes and either responds "match, no bytes" (hit) or sends hash+bytes in one shot (miss). Zero extra RTT, zero wasted bandwidth on hits.
+
 ## ASAP
