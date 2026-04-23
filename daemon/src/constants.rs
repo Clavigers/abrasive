@@ -1,4 +1,3 @@
-pub const REQUIRED_ORG: &str = "Clavigers";
 pub const USER_AGENT: &str = "abrasive-daemon";
 
 /// Number of parallel workspace clones the daemon keeps per (team, scope).

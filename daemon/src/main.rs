@@ -221,7 +221,7 @@ fn ws_handshake(tls_stream: TlsStream, peer: &str) -> Result<(WsConn, String), D
         .into_inner()
         .transpose()?
         .ok_or(AuthError::NoBearerToken)?;
-    println!("[{peer}] authenticated as github user '{login}'");
+    println!("[{peer}] authenticated as user {login}");
     Ok((stream_or_err?, login))
 }
 
