@@ -1,5 +1,3 @@
-use crate::constants::REQUIRED_ORG;
-
 #[derive(Debug, thiserror::Error)]
 pub enum DaemonError {
     #[error("io error: {0}")]
@@ -32,18 +30,24 @@ pub enum AuthError {
     #[error("missing bearer token")]
     NoBearerToken,
 
-    #[error("github /user call failed: {0}")]
-    UserCall(#[source] ureq::Error),
+    #[error("missing env var {0}")]
+    MissingEnv(&'static str),
 
-    #[error("could not parse /user response: {0}")]
-    UserResponseParse(#[source] std::io::Error),
+    #[error("token does not look like an abrasive API token")]
+    InvalidTokenFormat,
 
-    #[error("no 'login' field in /user response")]
-    NoLoginField,
+    #[error("unknown or revoked token")]
+    UnknownToken,
 
-    #[error("user '{login}' is not a member of {}", REQUIRED_ORG)]
-    NotMember { login: String },
+    #[error("token is expired")]
+    TokenExpired,
 
-    #[error("github membership check failed: {0}")]
-    MembershipCheck(#[source] ureq::Error),
+    #[error("could not parse token expires_at: {0}")]
+    TimestampParse(String),
+
+    #[error("supabase call failed: {0}")]
+    SupabaseCall(#[source] ureq::Error),
+
+    #[error("could not parse supabase response: {0}")]
+    SupabaseParseResponse(#[source] std::io::Error),
 }
