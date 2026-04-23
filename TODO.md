@@ -42,6 +42,7 @@
 [CACHE] Optional sccache backend: opt-in flag in abrasive.toml that makes the daemon set `RUSTC_WRAPPER=sccache` + `SCCACHE_DIR=/dev/shm/sccache` + `CARGO_INCREMENTAL=0` instead of using the abrasive wrapper
 [PERF] Symlink `~/.cargo/registry` and `~/.cargo/git` to `/dev/shm/cargo-home/` (leave config + bin on disk)
 [PERF] Confirm `/tmp` is tmpfs on the remote (`mount | grep '/tmp '`); if not, enable `tmp.mount`
+[PERF] Ship `abrasive run` artifacts as zstd-reference-frame deltas against the client's last-received binary. Client keeps the last executable (bytes + hash) in agent memory keyed on scope; daemon uses it as a zstd prefix for the next compression so only the actual bytewise delta pays wire cost. Uses the zstd dep we already have (`Encoder::with_prefix` / `Decoder::with_prefix`) instead of pulling in bidiff/bsdiff. Expected 2-5x smaller payloads than plain zstd for incremental rebuilds, ~30-50 lines of code + one new message exchange ("I have prefix <hash>"). Do when a real user notices `abrasive run` getting slow on a big binary — not urgent while `abrasive build` handles the inner dev loop.
 [POLISH] Surface remote environment errors (missing `pkg-config`, missing system libs from build scripts) more clearly in the CLI rather than hiding them in the cargo wall-of-text
 [POLISH] Make `--version` / `--help` work outside an abrasive workspace (currently they get filtered by `should_go_remote` and forwarded to cargo even though they're abrasive subcommands)
 [POLISH] Make "setup" command that syncs and interactively writes an abrasive.toml file
