@@ -59,7 +59,7 @@ import PaperNote from '../components/PaperNote.astro';
         <p>Personally, I use Abrasive alongside <a href="https://mise.jdx.dev/">mise</a> (which makes sure my whole team uses the same Rust version). That combo covers most of what I wanted from Bazel.</p>
         <p>So here's a simple rule. If you want Bazel-like benefits and you're working in a big repo with many languages that depend on each other, use Bazel. If you want Bazel-like benefits and your project is mostly Rust, or your Rust code stays separate from other languages, Abrasive might work for you!</p>
         <p>Using Abrasive is just like using Cargo. The only setup is a one-time login and running <code>abrasive setup</code> in your project's root. After that, everything is just Cargo.</p>
-        <p>Abrasive also comes with a little dashboard (similar to BuildBuddy and EngFlow in the Bazel world). We host everything for you, and most devs will never need more than the free tier.</p>
+        <p>Abrasive also comes with a little dashboard (similar to <a href="https://www.buildbuddy.io/">BuildBuddy</a> and <a href="https://www.engflow.com/">EngFlow</a> in the Bazel world). We host everything for you, and most devs will never need more than the free tier.</p>
         <p>Today (April 22, 2026) Abrasive is still a little half-baked, and not all of the code is public yet. If you want to contribute, the most helpful thing you can do is use it.</p>
       </article>
       <div class="signature">
@@ -71,6 +71,15 @@ import PaperNote from '../components/PaperNote.astro';
       </div>
     </section>
 
+    <section class="prealpha-gate">
+      <div class="prealpha-label">Pre-Alpha Group Cap</div>
+      <div class="prealpha-count"><span class="prealpha-current">3</span> / 10 spots filled</div>
+      <div class="prealpha-bar">
+        <div class="prealpha-fill" style="width: 30%"></div>
+      </div>
+      <p class="prealpha-note">When the bar hits 10, abrasive closes to new pre-alpha users until it's ready for more.</p>
+    </section>
+
     <div class="spacer"></div>
   </main>
 </Base>
@@ -78,6 +87,55 @@ import PaperNote from '../components/PaperNote.astro';
 <style>
   .spacer {
     min-height: 40vh;
+  }
+  .prealpha-gate {
+    width: 100%;
+    max-width: 520px;
+    margin: 5rem auto 2rem;
+    padding: 1.75rem 2rem;
+    text-align: center;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.02);
+  }
+  .prealpha-label {
+    font-size: 0.78rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    font-weight: 600;
+    margin-bottom: 0.55rem;
+  }
+  .prealpha-count {
+    font-family: "Figtree", -apple-system, sans-serif;
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: var(--fg);
+    letter-spacing: -0.02em;
+    margin-bottom: 1rem;
+  }
+  .prealpha-current {
+    color: #e8b931;
+  }
+  .prealpha-bar {
+    width: 100%;
+    height: 14px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    overflow: hidden;
+  }
+  .prealpha-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #e8b931, #d4872e);
+    border-radius: 7px;
+    transition: width 0.4s ease;
+  }
+  .prealpha-note {
+    font-size: 0.82rem;
+    color: var(--muted);
+    margin-top: 1rem;
+    line-height: 1.4;
   }
   .founder-letter {
     --letter-base: max(1.15rem, 1.55vw);
