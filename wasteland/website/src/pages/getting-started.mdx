@@ -7,16 +7,48 @@ import InstallCommand from '../components/InstallCommand.astro';
 
 <main>
   <section class="step">
-    ## If you haven't already, install abrasive
+    ## 1. Install abrasive
     <InstallCommand />
   </section>
 
+  <section class="step">
+    ## 2. Authenticate
+
+    Generate an API token from your account page, then paste it into the CLI.
+
+    <CodeBlock code="abrasive auth" />
+
+    The command prints a URL and waits for you to paste the token. Open [abrasive.netlify.app/me](https://abrasive.netlify.app/me) in your browser, click **New Token**, copy the shown value (you only see it once), and paste it back into the terminal. Abrasive saves it to `~/.abrasive/credentials.toml` and reuses it on every subsequent command.
+  </section>
+
+  <section class="step">
+    ## 3. Initialize your project
+
+    From the root of any cargo project:
+
+    <CodeBlock code="abrasive setup" />
+
+    This writes an `abrasive.toml` at the root (`team = "public"`, `scope = <directory name>`) and warms the remote build slot by syncing your source tree once. Edit `abrasive.toml` afterward if you want a different team or scope.
+  </section>
+
+  <section class="step">
+    ## 4. Build
+
+    From anywhere inside the project, run abrasive with the same flags you'd pass to cargo:
+
+    <CodeBlock code="abrasive build" />
+    <CodeBlock code="abrasive run -- --help" />
+    <CodeBlock code="abrasive test" />
+
+    The first build warms the remote cache; subsequent builds across your team reuse it.
+  </section>
+
   <section class="step" id="alias">
-    ## Set up a cargo alias <span class="optional">(optional)</span>
+    ## 5. Set up a cargo alias <span class="optional">(optional)</span>
 
-    Command line compatible with Cargo. Alias `cargo=abrasive` and keep using cargo the way you normally would.
+    Abrasive is command-line compatible with cargo. Aliasing `cargo=abrasive` lets you keep all your existing muscle memory and scripts.
 
-    Add an alias to your shell config:
+    For bash:
 
     <CodeBlock code={`echo 'alias cargo="abrasive"' >> ~/.bashrc && source ~/.bashrc`} />
 
@@ -24,21 +56,7 @@ import InstallCommand from '../components/InstallCommand.astro';
 
     <CodeBlock code={`alias --save cargo="abrasive"`} />
 
-    Now `cargo setup`, `cargo build`, etc. will all route through abrasive.
-  </section>
-
-  <section class="step">
-    ## Initialize your project
-
-    Navigate to the root of your project and run:
-
-    <CodeBlock code="abrasive setup" />
-
-    Or if you set up the cargo alias:
-
-    <CodeBlock code="cargo setup" />
-
-    This walks you through an interactive setup and creates an `abrasive.toml` in the root of your project.
+    Now `cargo setup`, `cargo build`, `cargo run`, etc. all route through abrasive.
   </section>
 </main>
 
@@ -78,5 +96,13 @@ import InstallCommand from '../components/InstallCommand.astro';
     border-radius: 4px;
     font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
     font-size: 0.85em;
+  }
+  p a {
+    color: var(--accent);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  p a:hover {
+    color: #f0c63d;
   }
 `}</style>
