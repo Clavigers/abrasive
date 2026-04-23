@@ -56,10 +56,10 @@ import PaperNote from '../components/PaperNote.astro';
         <p>Abrasive started with a simple question: <strong>"what if we took the best parts of Bazel and the best parts of Cargo, and mashed them together?"</strong></p>
         <p>A few tools already do some of what Abrasive does, but none of them do all of it. <a href="https://github.com/mozilla/sccache">Sccache</a> shares a build cache between machines. <a href="https://nexte.st/">Nextest</a> (and <a href="https://maelstrom-software.com/">Maelstrom</a>) run only the tests you need, like Bazel does. There's also <a href="https://github.com/liamaharon/crunch">crunch</a>, which copies your code to a remote machine over SSH. Surprisingly, that one gives me a lot of what I want!</p>
         <p>The tools I love (especially <a href="https://nexte.st/">nextest</a>) are wonderfully Rust-specific, but they don't do everything I want from Bazel. Bazel is great, but because it's designed to work across many languages, it's awkward to use with Rust. Migration is especially painful.</p>
-        <p>Personally, I use Abrasive alongside <a href="https://mise.jdx.dev/">mise</a> (which makes sure my whole team uses the same Rust version). That combo covers most of what I wanted from Bazel.</p>
+        <p>Personally, I use Abrasive alongside <a href="https://mise.jdx.dev/">mise</a>. That combo covers most of what I wanted from Bazel.</p>
         <p>So here's a simple rule. If you want Bazel-like benefits and you're working in a big repo with many languages that depend on each other, use Bazel. If you want Bazel-like benefits and your project is mostly Rust, or your Rust code stays separate from other languages, Abrasive might work for you!</p>
         <p>Using Abrasive is just like using Cargo. The only setup is a one-time login and running <code>abrasive setup</code> in your project's root. After that, everything is just Cargo.</p>
-        <p>Abrasive also comes with a little dashboard (similar to <a href="https://www.buildbuddy.io/">BuildBuddy</a> and <a href="https://www.engflow.com/">EngFlow</a> in the Bazel world). We host everything for you, and most devs will never need more than the free tier.</p>
+        <p>Abrasive also comes with a little dashboard (similar to <a href="https://www.buildbuddy.io/">BuildBuddy</a> and <a href="https://www.engflow.com/">EngFlow</a> in the Bazel world).</p>
         <p>Today (April 22, 2026) Abrasive is still a little half-baked, and not all of the code is public yet. If you want to contribute, the most helpful thing you can do is use it.</p>
       </article>
       <div class="signature">
@@ -72,12 +72,11 @@ import PaperNote from '../components/PaperNote.astro';
     </section>
 
     <section class="prealpha-gate">
-      <div class="prealpha-label">Pre-Alpha Group Cap</div>
-      <div class="prealpha-count"><span class="prealpha-current">3</span> / 20 spots filled</div>
+      <p class="prealpha-note">I can only handle about 20 pre-alpha users right now. If we hit the cap, new signups pause until I'm ready for more.</p>
       <div class="prealpha-bar">
         <div class="prealpha-fill" style="width: 15%"></div>
       </div>
-      <p class="prealpha-note">I can only handle about 20 pre-alpha users right now. If we hit the cap, new signups pause until I'm ready for more.</p>
+      <p class="prealpha-caption"><span class="prealpha-current">3</span> of 20 signed up</p>
       <a class="prealpha-cta" data-auth="signed-out" href="/dashboard/sign-up">Sign up free</a>
     </section>
 
@@ -91,51 +90,40 @@ import PaperNote from '../components/PaperNote.astro';
   }
   .prealpha-gate {
     width: min(100%, 720px);
-    margin: 5rem auto 2rem;
+    margin: 1rem auto;
     padding: 0 2rem;
     text-align: center;
   }
-  .prealpha-label {
-    font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
-    font-size: 0.82rem;
+  .prealpha-note {
+    font-size: 0.95rem;
     color: var(--muted);
-    text-transform: uppercase;
-    letter-spacing: 0.14em;
-    font-weight: 500;
-    margin-bottom: 0.5rem;
-  }
-  .prealpha-count {
-    font-family: "Figtree", -apple-system, sans-serif;
-    font-size: 2rem;
-    font-weight: 700;
-    color: var(--fg);
-    letter-spacing: -0.035em;
-    margin-bottom: 1.25rem;
-  }
-  .prealpha-current {
-    color: #e8b931;
+    line-height: 1.55;
+    max-width: 520px;
+    margin: 0 auto 0.9rem;
   }
   .prealpha-bar {
     width: 100%;
-    height: 6px;
+    max-width: 360px;
+    height: 4px;
+    margin: 0 auto;
     background: rgba(255, 255, 255, 0.06);
-    border-radius: 3px;
+    border-radius: 2px;
     overflow: hidden;
   }
   .prealpha-fill {
     height: 100%;
     background: linear-gradient(90deg, #e8b931, #d4872e);
-    border-radius: 3px;
+    border-radius: 2px;
     transition: width 0.4s ease;
   }
-  .prealpha-note {
-    font-size: 0.9rem;
+  .prealpha-caption {
+    font-size: 0.8rem;
     color: var(--muted);
-    margin-top: 1rem;
-    line-height: 1.55;
-    max-width: 440px;
-    margin-left: auto;
-    margin-right: auto;
+    margin-top: 0.4rem;
+  }
+  .prealpha-current {
+    color: #e8b931;
+    font-weight: 500;
   }
   .prealpha-cta {
     display: inline-block;
