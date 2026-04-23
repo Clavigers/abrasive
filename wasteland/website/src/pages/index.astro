@@ -49,13 +49,17 @@ import PaperNote from '../components/PaperNote.astro';
 
     <section class="founder-letter">
       <header>
-        <h2>Wouldn't it be Nice if Bazel and Rust Got Along</h2>
+        <h2>Wouldn't it be nice if Bazel and Rust got along?</h2>
       </header>
       <article>
-        <p>It would be nice! That is not actually what Abrasive is... Abrasive is what happened when we asked this question, "What if we could take everything we like about bazel and everything we like about cargo and mush them together?""</p> 
-        <p>There are existing solutions address touch on parts of this dream, for instance sccache for shared remote caching and nextest for that bazel like only test what you need experience (Also Maelstrom). There is also crunch which rsyncs to a machine you can ssh into, and surprisingly that gives me a lot of what I want!</p> 
-        <p>but none of these solutions fully scratched my itch so I made abrasive. The main features are A. Remote shared caching (including incremental cache). B. Remote build in lightweight "containers" (a la maelstrom) C. A simple observability UI (a la engflow / buildbuddy) D. Cross compilation that just works (including Mac)</p>
-        <p>Right now I am basically begging for beta users! if you want some free semi expensive compute for your rust builds and you are willing to deal with some bugs to get it... we are perfectly matched. </p>
+        <p>That would be nice! But that's not really what Abrasive is…</p>
+        <p>Abrasive started with a simple question: <strong>"what if we took the best parts of Bazel and the best parts of Cargo, and mashed them together?"</strong></p>
+        <p>A few tools already do some of what Abrasive does, but none of them do all of it. <a href="https://github.com/mozilla/sccache">Sccache</a> shares a build cache between machines. <a href="https://nexte.st/">Nextest</a> (and <a href="https://maelstrom-software.com/">Maelstrom</a>) run only the tests you need, like Bazel does. There's also <a href="https://github.com/liamaharon/crunch">crunch</a>, which copies your code to a remote machine over SSH. Surprisingly, that one gives me a lot of what I want!</p>
+        <p>The tools I love (especially <a href="https://nexte.st/">nextest</a>) are wonderfully Rust-specific, but they don't do everything I want from Bazel. Bazel does, but because it's designed to work across many languages, it's awkward to use with Rust. Migration is especially painful.</p>
+        <p>So here's a simple rule. If you want Bazel-like benefits and you're working in a big repo with many languages that depend on each other, use Bazel. If you want Bazel-like benefits and your project is mostly Rust — or your Rust code stays separate from other languages — Abrasive is built for you!</p>
+        <p>Using Abrasive is just like using Cargo. The only setup is a one-time login and running <code>abrasive setup</code> in your project's root. After that, everything is just Cargo.</p>
+        <p>Abrasive also comes with a little dashboard (similar to BuildBuddy and EngFlow in the Bazel world). We host everything for you, and most regular devs will never need more than the free tier.</p>
+        <p>Heads up: today (April 22, 2026) Abrasive is still a little half-baked, and not all of the code is public yet. If you want to contribute, the most helpful thing you can do is use it.</p>
       </article>
       <div class="signature">
         <span class="sig-handwritten">Will Murray</span>
