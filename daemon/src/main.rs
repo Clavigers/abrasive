@@ -450,6 +450,10 @@ fn run_build(stream: &mut WsConn, peer: &str, workspace: &Path, req: BuildReques
         let _ = send_msg(stream, &Message::BuildFinished { exit_code: 0 });
         return;
     }
+    if req.cargo_args.first().map_or(false, |c| c == "clean") {
+        handle_clean(stream, peer, workspace);
+        return;
+    }
     let (cargo_args, run_it) = build_cargo_args(req.cargo_args, req.host_platform);
     let cd_target = build_dir(workspace, req.subdir.as_deref());
     println!(
@@ -517,6 +521,55 @@ fn send_spawn_failure(stream: &mut WsConn, e: &std::io::Error) {
     let msg = format!("failed to spawn cargo: {e}\n").into_bytes();
     let _ = send_msg(stream, &Message::BuildStderr(msg));
     let _ = send_msg(stream, &Message::BuildFinished { exit_code: 1 });
+}
+
+/// Cargo clean normally just deletes the `target/` symlink we set up, leaving
+/// the actual tmpfs cache untouched. This wipes the tmpfs target's contents
+/// directly so a follow-up build genuinely starts cold.
+fn handle_clean(stream: &mut WsConn, peer: &str, workspace: &Path) {
+    match clean_tmpfs_target(workspace) {
+        Ok((files, bytes)) => {
+            let mib = bytes as f64 / (1024.0 * 1024.0);
+            let line = format!("     Removed {files} files, {mib:.1}MiB total\n");
+            let _ = send_msg(stream, &Message::BuildStderr(line.into_bytes()));
+            println!("[{peer}] clean: removed {files} files, {bytes} bytes");
+        }
+        Err(e) => {
+            let msg = format!("clean failed: {e}\n").into_bytes();
+            let _ = send_msg(stream, &Message::BuildStderr(msg));
+            println!("[{peer}] clean failed: {e}");
+        }
+    }
+    let _ = send_msg(stream, &Message::BuildFinished { exit_code: 0 });
+}
+
+fn clean_tmpfs_target(workspace: &Path) -> std::io::Result<(usize, u64)> {
+    let target_link = workspace.join("target");
+    let tmpfs_target = fs::read_link(&target_link)?;
+    let (files, bytes) = tmpfs_dir_size(&tmpfs_target);
+    for entry in fs::read_dir(&tmpfs_target)? {
+        let path = entry?.path();
+        if path.is_dir() {
+            fs::remove_dir_all(&path)?;
+        } else {
+            fs::remove_file(&path)?;
+        }
+    }
+    Ok((files, bytes))
+}
+
+fn tmpfs_dir_size(path: &Path) -> (usize, u64) {
+    let mut files = 0;
+    let mut bytes = 0;
+    for entry in walkdir::WalkDir::new(path).into_iter().filter_map(Result::ok) {
+        if let Ok(meta) = entry.metadata() {
+            if meta.is_file() {
+                files += 1;
+                bytes += meta.len();
+            }
+        }
+    }
+    (files, bytes)
 }
 
 fn forward_build_output(stream: &mut WsConn, mut child: Child, peer: &str) {
