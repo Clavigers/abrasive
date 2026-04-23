@@ -492,6 +492,9 @@ fn spawn_cargo(args: &[String], cd: &Path) -> std::io::Result<Child> {
         // component installed on the remote.
         .env("CARGO_UNSTABLE_CODEGEN_BACKEND", "true")
         .env("CARGO_PROFILE_DEV_CODEGEN_BACKEND", "cranelift")
+        // Keep cargo's ANSI color output even though stdout/stderr
+        // are piped here — the client re-renders into its own TTY.
+        .env("CARGO_TERM_COLOR", "always")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()

@@ -42,7 +42,6 @@
 [CACHE] Optional sccache backend: opt-in flag in abrasive.toml that makes the daemon set `RUSTC_WRAPPER=sccache` + `SCCACHE_DIR=/dev/shm/sccache` + `CARGO_INCREMENTAL=0` instead of using the abrasive wrapper
 [PERF] Symlink `~/.cargo/registry` and `~/.cargo/git` to `/dev/shm/cargo-home/` (leave config + bin on disk)
 [PERF] Confirm `/tmp` is tmpfs on the remote (`mount | grep '/tmp '`); if not, enable `tmp.mount`
-[POLISH] Fix interleaved `[REMOTE]` prefix output: buffer until newline before prefixing each line, so chunks that arrive split mid-line don't render as `[REMOTE]    Compiling[REMOTE]  bytemuck v1.25.0`
 [POLISH] Surface remote environment errors (missing `pkg-config`, missing system libs from build scripts) more clearly in the CLI rather than hiding them in the cargo wall-of-text
 [POLISH] Make `--version` / `--help` work outside an abrasive workspace (currently they get filtered by `should_go_remote` and forwarded to cargo even though they're abrasive subcommands)
 [POLISH] Make "setup" command that syncs and interactively writes an abrasive.toml file
