@@ -4,6 +4,7 @@ use abrasive::agent;
 use abrasive::auth;
 use abrasive::errors::{self, CliError, CliResult};
 use abrasive::platform::host_triple;
+use abrasive::tags;
 use abrasive::tls;
 use abrasive_protocol::{BuildRequest, FileEntry, Manifest, Message};
 use clap::builder::styling::{AnsiColor, Styles};
@@ -271,18 +272,19 @@ fn start_sync(stream: &mut Conn, root: &Path, team: &str, scope: &str) -> CliRes
         Message::NeedFiles(paths) => Ok(SyncOutcome::Ready(paths)),
         Message::SlotsBusy => Ok(SyncOutcome::SlotsBusy),
         other => {
-            eprintln!("[LOCAL] unexpected message: {other:?}");
+            eprintln!("{} unexpected message: {other:?}", tags::LOCAL);
             Err(CliError::disconnected())
         }
     }
 }
 
 fn build_and_log_manifest(root: &Path, team: &str, scope: &str) -> Manifest {
-    eprintln!("[LOCAL] scanning files...");
+    eprintln!("{} scanning files...", tags::LOCAL);
     let files = build_manifest(root);
     let files_gz = Manifest::encode_files(&files);
     eprintln!(
-        "[LOCAL] manifest: {} entries, {} bytes gzipped",
+        "{} manifest: {} entries, {} bytes gzipped",
+        tags::LOCAL,
         files.len(),
         files_gz.len()
     );
@@ -294,7 +296,7 @@ fn build_and_log_manifest(root: &Path, team: &str, scope: &str) -> Manifest {
 }
 
 fn stream_files(stream: &mut Conn, root: &Path, needed: Vec<String>) -> CliResult<()> {
-    eprintln!("[LOCAL] sending {} files", needed.len());
+    eprintln!("{} sending {} files", tags::LOCAL, needed.len());
     let (tx, rx) = sync_channel::<(String, Vec<u8>)>(32);
     let root_buf = root.to_path_buf();
     let producer = thread::spawn(move || {
@@ -314,7 +316,7 @@ fn stream_files(stream: &mut Conn, root: &Path, needed: Vec<String>) -> CliResul
 fn wait_for_sync_ack(stream: &mut Conn) -> CliResult<()> {
     match recv_frame(stream)? {
         Message::SyncAck => {
-            eprintln!("[LOCAL] done");
+            eprintln!("{} done", tags::LOCAL);
             Ok(())
         }
         _ => Err(CliError::disconnected()),
@@ -363,7 +365,7 @@ fn attempt_build(
     match send_probe(&mut stream, ctx, cargo_args)? {
         ProbeResult::SlotsBusy => Ok(BuildOutcome::SlotsBusy),
         ProbeResult::Accepted => {
-            eprintln!("[LOCAL] fingerprint matched, skipping manifest");
+            eprintln!("{} fingerprint matched, skipping manifest", tags::LOCAL);
             stream_build_output(&mut stream).map(BuildOutcome::Done)
         }
         ProbeResult::Miss => match start_sync(&mut stream, &ctx.root_dir, team, scope)? {
@@ -408,7 +410,7 @@ fn send_probe(
         Message::ProbeMiss => Ok(ProbeResult::Miss),
         Message::SlotsBusy => Ok(ProbeResult::SlotsBusy),
         other => {
-            eprintln!("[LOCAL] unexpected probe response: {other:?}");
+            eprintln!("{} unexpected probe response: {other:?}", tags::LOCAL);
             Err(CliError::disconnected())
         }
     }
@@ -416,10 +418,10 @@ fn send_probe(
 
 fn open_connection(token: &str) -> CliResult<Conn> {
     if let Ok(stream) = UnixStream::connect(agent::socket_path()) {
-        eprintln!("[LOCAL] via agent");
+        eprintln!("{} via agent", tags::LOCAL);
         return Ok(Conn::Agent(stream));
     }
-    eprintln!("[LOCAL] via remote");
+    eprintln!("{} via remote", tags::LOCAL);
     let addr: SocketAddr = format!("{}:{}", IP, PORT).parse().unwrap();
     let tcp =
         TcpStream::connect_timeout(&addr, Duration::from_secs(5)).map_err(CliError::connect)?;
@@ -487,7 +489,7 @@ fn stream_build_output(stream: &mut Conn) -> CliResult<ExitCode> {
 
 fn flush_complete_lines(buf: &mut Vec<u8>, out: &mut impl Write) -> io::Result<()> {
     while let Some(pos) = buf.iter().position(|b| *b == b'\n') {
-        out.write_all(b"[REMOTE] ")?;
+        write!(out, "{} ", tags::REMOTE)?;
         out.write_all(&buf[..=pos])?;
         buf.drain(..=pos);
     }
@@ -498,7 +500,7 @@ fn flush_trailing(buf: &mut Vec<u8>, out: &mut impl Write) -> io::Result<()> {
     if buf.is_empty() {
         return Ok(());
     }
-    out.write_all(b"[REMOTE] ")?;
+    write!(out, "{} ", tags::REMOTE)?;
     out.write_all(buf)?;
     out.write_all(b"\n")?;
     buf.clear();
