@@ -494,6 +494,10 @@ fn spawn_cargo(args: &[String], cd: &Path) -> std::io::Result<Child> {
         // touching the user's Cargo.toml. Backtraces still work; rustc
         // skips most DWARF generation. Big win on cold builds.
         .env("CARGO_PROFILE_DEV_DEBUG", "line-tables-only")
+        // Strip the remaining debug info at link time. Smaller binary
+        // ships faster when `run` ships the artifact back to the client;
+        // trade-off is panic backtraces lose line numbers.
+        .env("CARGO_PROFILE_DEV_STRIP", "debuginfo")
         // Use the cranelift codegen backend for the dev profile.
         // Cranelift is much faster than LLVM at producing unoptimized
         // code, at the cost of slower runtime — perfect for dev builds.
@@ -582,15 +586,28 @@ fn send_artifact(stream: &mut WsConn, path: &Path, peer: &str) {
         eprintln!("[{peer}] failed to read artifact {}", path.display());
         return;
     };
+    let raw = contents.len();
+    let compressed = match zstd::encode_all(&contents[..], 3) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[{peer}] zstd compression failed: {e}");
+            return;
+        }
+    };
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "artifact".to_string());
-    let bytes = contents.len();
-    if let Err(e) = send_msg(stream, &Message::Executable { name, contents }) {
+    let sent = compressed.len();
+    if let Err(e) = send_msg(stream, &Message::Executable { name, contents: compressed }) {
         eprintln!("[{peer}] failed to ship executable: {e}");
     } else {
-        println!("[{peer}] shipped {} bytes ({})", bytes, path.display());
+        println!(
+            "[{peer}] shipped {} → {} bytes ({})",
+            raw,
+            sent,
+            path.display()
+        );
     }
 }
 
