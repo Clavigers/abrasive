@@ -3,7 +3,7 @@ mod constants;
 mod errors;
 mod slots;
 
-use abrasive_protocol::{BuildRequest, FileEntry, Manifest, Message, PlatformTriple};
+use abrasive_protocol::{BuildRequest, FileEntry, Manifest, Message, PlatformTriple, SpeculativeSync};
 use rayon::prelude::*;
 use rustls::ServerConnection;
 use rustls::StreamOwned;
@@ -110,13 +110,13 @@ fn serve_one_request(
     fingerprints: &FingerprintCache,
 ) -> Result<(), DaemonError> {
     match recv_msg(stream)? {
-        Message::Probe { fingerprint, request } => serve_build(
+        Message::Probe { fingerprint, request, speculative } => serve_build(
             stream,
             peer,
             login,
             slots,
             fingerprints,
-            ProbeInfo { fingerprint, request },
+            ProbeInfo { fingerprint, request, speculative },
         ),
         Message::TipRequest => serve_tip(stream),
         other => Err(DaemonError::UnexpectedMessage {
@@ -186,18 +186,76 @@ fn slow_path(
     probe: ProbeInfo,
     fingerprints: &FingerprintCache,
 ) -> Result<(), DaemonError> {
+    match probe.speculative {
+        Some(spec) => speculative_sync(stream, peer, workspace, &spec)?,
+        None => legacy_sync(stream, peer, workspace)?,
+    }
+    fingerprints.insert(slot, &probe.request.team, &probe.request.scope, probe.fingerprint);
+    run_build(stream, peer, workspace, probe.request);
+    Ok(())
+}
+
+/// New speculative-sync path: the client already sent the manifest and a
+/// guess at the files we'll need. If the guess is complete we skip to
+/// SyncAck in one round-trip; otherwise we send NeedFiles for the
+/// stragglers and finish via the legacy FileData → SyncAck flow.
+fn speculative_sync(
+    stream: &mut WsConn,
+    peer: &str,
+    workspace: &Path,
+    spec: &SpeculativeSync,
+) -> Result<(), DaemonError> {
+    let files = spec.manifest.decode_files()?;
+    write_bundled_files(workspace, &spec.files)?;
+    let local = local_manifest(workspace);
+    let needed = needed_files(&files, &local);
+    delete_stale(workspace, &local, &files);
+    if needed.is_empty() {
+        println!("[{peer}] speculative sync complete ({} files bundled)", spec.files.len());
+        send_msg(stream, &Message::SyncAck)
+    } else {
+        println!(
+            "[{peer}] speculative partial: {} bundled, {} still needed",
+            spec.files.len(),
+            needed.len()
+        );
+        send_msg(stream, &Message::NeedFiles(needed))?;
+        receive_files(stream, workspace)?;
+        send_msg(stream, &Message::SyncAck)
+    }
+}
+
+fn write_bundled_files(
+    workspace: &Path,
+    bundled: &[(String, Vec<u8>)],
+) -> Result<(), DaemonError> {
+    for (path, contents) in bundled {
+        let full = workspace.join(path);
+        if let Some(parent) = full.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(&full, contents)?;
+    }
+    Ok(())
+}
+
+/// Legacy path for clients that don't bundle speculative data.
+fn legacy_sync(
+    stream: &mut WsConn,
+    peer: &str,
+    workspace: &Path,
+) -> Result<(), DaemonError> {
     send_msg(stream, &Message::ProbeMiss)?;
     let manifest = expect_manifest(stream)?;
     let files = manifest.decode_files()?;
     handle_sync(stream, workspace, peer, &files)?;
-    fingerprints.insert(slot, &probe.request.team, &probe.request.scope, probe.fingerprint);
-    run_build(stream, peer, workspace, probe.request);
     Ok(())
 }
 
 struct ProbeInfo {
     fingerprint: [u8; 32],
     request: BuildRequest,
+    speculative: Option<SpeculativeSync>,
 }
 
 fn tls_handshake(
