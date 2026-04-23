@@ -19,19 +19,19 @@ fn main() {
     let _ = fs::remove_file(&path);
     let mut ws: Option<tls::WsConn> = match connect(&token) {
         Ok(conn) => {
-            eprintln!("[agent] connected to daemon");
+            eprintln!("[LOCAL] connected to daemon");
             Some(conn)
         }
         Err(e) => {
-            eprintln!("[agent] initial connection failed: {e}");
+            eprintln!("[LOCAL] initial connection failed: {e}");
             None
         }
     };
     let listener = UnixListener::bind(&path).expect("failed to bind agent socket");
-    eprintln!("[agent] listening on {}", path.display());
+    eprintln!("[LOCAL] listening on {}", path.display());
     for client in listener.incoming().flatten() {
         if let Err(e) = handle(client, &token, &mut ws) {
-            eprintln!("[agent] session error: {e}");
+            eprintln!("[LOCAL] session error: {e}");
             ws = None;
         }
     }
@@ -40,7 +40,7 @@ fn main() {
 fn handle(mut client: UnixStream, token: &str, ws: &mut Option<tls::WsConn>) -> io::Result<()> {
     if ws.is_none() {
         *ws = Some(connect(token)?);
-        eprintln!("[agent] connected to daemon");
+        eprintln!("[LOCAL] connected to daemon");
     }
     proxy(&mut client, ws.as_mut().unwrap())
 }

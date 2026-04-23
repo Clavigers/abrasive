@@ -271,18 +271,18 @@ fn start_sync(stream: &mut Conn, root: &Path, team: &str, scope: &str) -> CliRes
         Message::NeedFiles(paths) => Ok(SyncOutcome::Ready(paths)),
         Message::SlotsBusy => Ok(SyncOutcome::SlotsBusy),
         other => {
-            eprintln!("[sync] unexpected message: {other:?}");
+            eprintln!("[LOCAL] unexpected message: {other:?}");
             Err(CliError::disconnected())
         }
     }
 }
 
 fn build_and_log_manifest(root: &Path, team: &str, scope: &str) -> Manifest {
-    eprintln!("[sync] scanning files...");
+    eprintln!("[LOCAL] scanning files...");
     let files = build_manifest(root);
     let files_gz = Manifest::encode_files(&files);
     eprintln!(
-        "[sync] manifest: {} entries, {} bytes gzipped",
+        "[LOCAL] manifest: {} entries, {} bytes gzipped",
         files.len(),
         files_gz.len()
     );
@@ -294,7 +294,7 @@ fn build_and_log_manifest(root: &Path, team: &str, scope: &str) -> Manifest {
 }
 
 fn stream_files(stream: &mut Conn, root: &Path, needed: Vec<String>) -> CliResult<()> {
-    eprintln!("[sync] sending {} files", needed.len());
+    eprintln!("[LOCAL] sending {} files", needed.len());
     let (tx, rx) = sync_channel::<(String, Vec<u8>)>(32);
     let root_buf = root.to_path_buf();
     let producer = thread::spawn(move || {
@@ -314,7 +314,7 @@ fn stream_files(stream: &mut Conn, root: &Path, needed: Vec<String>) -> CliResul
 fn wait_for_sync_ack(stream: &mut Conn) -> CliResult<()> {
     match recv_frame(stream)? {
         Message::SyncAck => {
-            eprintln!("[sync] done");
+            eprintln!("[LOCAL] done");
             Ok(())
         }
         _ => Err(CliError::disconnected()),
@@ -363,7 +363,7 @@ fn attempt_build(
     match send_probe(&mut stream, ctx, cargo_args)? {
         ProbeResult::SlotsBusy => Ok(BuildOutcome::SlotsBusy),
         ProbeResult::Accepted => {
-            eprintln!("[sync] fingerprint matched, skipping manifest");
+            eprintln!("[LOCAL] fingerprint matched, skipping manifest");
             stream_build_output(&mut stream).map(BuildOutcome::Done)
         }
         ProbeResult::Miss => match start_sync(&mut stream, &ctx.root_dir, team, scope)? {
@@ -408,7 +408,7 @@ fn send_probe(
         Message::ProbeMiss => Ok(ProbeResult::Miss),
         Message::SlotsBusy => Ok(ProbeResult::SlotsBusy),
         other => {
-            eprintln!("[sync] unexpected probe response: {other:?}");
+            eprintln!("[LOCAL] unexpected probe response: {other:?}");
             Err(CliError::disconnected())
         }
     }
@@ -416,10 +416,10 @@ fn send_probe(
 
 fn open_connection(token: &str) -> CliResult<Conn> {
     if let Ok(stream) = UnixStream::connect(agent::socket_path()) {
-        eprintln!("[conn] via agent");
+        eprintln!("[LOCAL] via agent");
         return Ok(Conn::Agent(stream));
     }
-    eprintln!("[conn] via remote");
+    eprintln!("[LOCAL] via remote");
     let addr: SocketAddr = format!("{}:{}", IP, PORT).parse().unwrap();
     let tcp =
         TcpStream::connect_timeout(&addr, Duration::from_secs(5)).map_err(CliError::connect)?;
