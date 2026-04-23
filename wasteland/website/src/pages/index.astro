@@ -80,25 +80,24 @@ import PaperNote from '../components/PaperNote.astro';
       <a class="prealpha-cta" data-auth="signed-out" href="/dashboard/sign-up">Sign up free</a>
     </section>
 
-    <div class="spacer"></div>
   </main>
 </Base>
 
 <style>
-  .spacer {
-    min-height: 40vh;
-  }
   .prealpha-gate {
-    width: min(100%, 720px);
+    width: min(100%, 1280px);
     margin: 1rem auto;
     padding: 0 2rem;
     text-align: center;
+    font-family: "Figtree", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    letter-spacing: -0.025em;
   }
   .prealpha-note {
-    font-size: 0.95rem;
-    color: var(--muted);
-    line-height: 1.55;
-    max-width: 520px;
+    font-size: max(1.15rem, 1.55vw);
+    color: var(--fg);
+    line-height: 1.45;
+    font-weight: 400;
+    max-width: 900px;
     margin: 0 auto 0.9rem;
   }
   .prealpha-bar {
@@ -117,13 +116,14 @@ import PaperNote from '../components/PaperNote.astro';
     transition: width 0.4s ease;
   }
   .prealpha-caption {
-    font-size: 0.8rem;
-    color: var(--muted);
-    margin-top: 0.4rem;
+    font-size: max(1.15rem, 1.55vw);
+    color: var(--fg);
+    line-height: 1.45;
+    font-weight: 400;
+    margin-top: 0.6rem;
   }
   .prealpha-current {
-    color: #e8b931;
-    font-weight: 500;
+    font-weight: inherit;
   }
   .prealpha-cta {
     display: inline-block;
