@@ -37,15 +37,21 @@ export default function SignIn() {
   if (!checked) return <main className="gate"><p>Loading…</p></main>
   if (session) return <main className="gate"><p>Redirecting…</p></main>
 
+  const isSignup = window.location.pathname.includes('sign-up')
+  const title = isSignup
+    ? 'Start your free abrasive account'
+    : 'This page requires authentication'
+  const buttonText = isSignup ? 'Sign up with GitHub' : 'Log in with GitHub'
+
   return (
     <div className="app">
       <TopBar session={null} />
       <main className="auth-wrapper">
         <div className="auth-content">
           <img src={cuddlyferris} alt="" className="auth-logo" />
-          <h1 className="auth-title">This page requires authentication</h1>
+          <h1 className="auth-title">{title}</h1>
           <button className="auth-link" onClick={signIn}>
-            Log in with GitHub
+            {buttonText}
           </button>
         </div>
       </main>
