@@ -257,8 +257,10 @@ const appUrl = import.meta.env.PUBLIC_APP_URL ?? '';
     import.meta.env.PUBLIC_SUPABASE_ANON_KEY
   );
 
-  const signedOut = document.querySelector<HTMLElement>('[data-auth="signed-out"]');
-  const signedIn = document.querySelector<HTMLElement>('[data-auth="signed-in"]');
+  const signedOutAll = document.querySelectorAll<HTMLElement>('[data-auth="signed-out"]');
+  const signedInAll = document.querySelectorAll<HTMLElement>('[data-auth="signed-in"]');
+  const signedOut = signedOutAll[0] ?? null;
+  const signedIn = signedInAll[0] ?? null;
   const avatarWrap = signedIn?.querySelector<HTMLElement>('.avatar-wrap');
   const avatarBtn = signedIn?.querySelector<HTMLButtonElement>('.avatar-btn');
   const avatarImg = signedIn?.querySelector<HTMLImageElement>('.avatar-img');
@@ -285,11 +287,11 @@ const appUrl = import.meta.env.PUBLIC_APP_URL ?? '';
       if (avatarFallback) avatarFallback.textContent = (username[0] ?? '?').toUpperCase();
       if (usernameEl) usernameEl.textContent = '@' + username;
       if (emailEl) emailEl.textContent = session.user.email ?? '';
-      signedOut.hidden = true;
-      signedIn.hidden = false;
+      signedOutAll.forEach((el) => (el.hidden = true));
+      signedInAll.forEach((el) => (el.hidden = false));
     } else {
-      signedOut.hidden = false;
-      signedIn.hidden = true;
+      signedOutAll.forEach((el) => (el.hidden = false));
+      signedInAll.forEach((el) => (el.hidden = true));
       closeMenu();
     }
   };
