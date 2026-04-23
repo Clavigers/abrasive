@@ -10,13 +10,14 @@ use rustls::StreamOwned;
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::{BufReader, Read};
+use std::io::{BufRead, BufReader, Read};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, ChildStdout, Command, Stdio};
 use std::sync::Arc;
 use std::sync::mpsc::Sender;
 use std::thread;
+use std::thread::JoinHandle;
 use std::time::Instant;
 use tungstenite::Message as WsMessage;
 use tungstenite::WebSocket;
@@ -449,7 +450,7 @@ fn run_build(stream: &mut WsConn, peer: &str, workspace: &Path, req: BuildReques
         let _ = send_msg(stream, &Message::BuildFinished { exit_code: 0 });
         return;
     }
-    let cargo_args = build_cargo_args(req.cargo_args, req.host_platform);
+    let (cargo_args, run_it) = build_cargo_args(req.cargo_args, req.host_platform);
     let cd_target = build_dir(workspace, req.subdir.as_deref());
     println!(
         "[{peer}] mold -run cargo +nightly {} (in {})",
@@ -457,14 +458,22 @@ fn run_build(stream: &mut WsConn, peer: &str, workspace: &Path, req: BuildReques
         cd_target.display()
     );
     match spawn_cargo(&cargo_args, &cd_target) {
+        Ok(child) if run_it => forward_run_output(stream, child, peer),
         Ok(child) => forward_build_output(stream, child, peer),
         Err(e) => send_spawn_failure(stream, &e),
     }
 }
 
-fn build_cargo_args(args: Vec<String>, platform: PlatformTriple) -> Vec<String> {
-    let (args, _run_it) = rewrite_run_as_build(args);
-    amend_args_with_platform(args, platform)
+fn build_cargo_args(args: Vec<String>, platform: PlatformTriple) -> (Vec<String>, bool) {
+    let (args, run_it) = rewrite_run_as_build(args);
+    let mut args = amend_args_with_platform(args, platform);
+    if run_it {
+        // Ask cargo to emit structured build messages on stdout so we can
+        // extract the produced executable's path. Diagnostics stay rendered
+        // on stderr so the client still sees normal colored output.
+        args.push("--message-format=json-render-diagnostics".to_string());
+    }
+    (args, run_it)
 }
 
 fn build_dir(workspace: &Path, subdir: Option<&str>) -> PathBuf {
@@ -518,6 +527,71 @@ fn forward_build_output(stream: &mut WsConn, mut child: Child, peer: &str) {
     let exit_code = child.wait().map(|s| s.code().unwrap_or(1) as u8).unwrap_or(1);
     let _ = send_msg(stream, &Message::BuildFinished { exit_code });
     println!("[{peer}] done");
+}
+
+fn forward_run_output(stream: &mut WsConn, mut child: Child, peer: &str) {
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+    let (tx, rx) = std::sync::mpsc::channel::<Message>();
+    spawn_pipe_reader(stderr, tx, Message::BuildStderr);
+    let parser = spawn_artifact_parser(stdout);
+    for msg in rx {
+        let _ = send_msg(stream, &msg);
+    }
+    let exit_code = child.wait().map(|s| s.code().unwrap_or(1) as u8).unwrap_or(1);
+    let artifact = parser.join().ok().flatten();
+    if exit_code == 0 {
+        if let Some(path) = artifact {
+            send_artifact(stream, &path, peer);
+        } else {
+            eprintln!("[{peer}] no bin artifact found in cargo output");
+        }
+    }
+    let _ = send_msg(stream, &Message::BuildFinished { exit_code });
+    println!("[{peer}] done");
+}
+
+fn spawn_artifact_parser(stdout: ChildStdout) -> JoinHandle<Option<PathBuf>> {
+    thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        let mut last: Option<PathBuf> = None;
+        for line in reader.lines().map_while(Result::ok) {
+            if let Some(path) = parse_cargo_artifact_line(&line) {
+                last = Some(path);
+            }
+        }
+        last
+    })
+}
+
+fn parse_cargo_artifact_line(line: &str) -> Option<PathBuf> {
+    let v: serde_json::Value = serde_json::from_str(line).ok()?;
+    if v.get("reason")?.as_str()? != "compiler-artifact" {
+        return None;
+    }
+    let exe = v.get("executable")?.as_str()?;
+    let kinds = v.get("target")?.get("kind")?.as_array()?;
+    if !kinds.iter().any(|k| k.as_str() == Some("bin")) {
+        return None;
+    }
+    Some(PathBuf::from(exe))
+}
+
+fn send_artifact(stream: &mut WsConn, path: &Path, peer: &str) {
+    let Ok(contents) = std::fs::read(path) else {
+        eprintln!("[{peer}] failed to read artifact {}", path.display());
+        return;
+    };
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "artifact".to_string());
+    let bytes = contents.len();
+    if let Err(e) = send_msg(stream, &Message::Executable { name, contents }) {
+        eprintln!("[{peer}] failed to ship executable: {e}");
+    } else {
+        println!("[{peer}] shipped {} bytes ({})", bytes, path.display());
+    }
 }
 
 fn spawn_pipe_reader<R: Read + Send + 'static>(
