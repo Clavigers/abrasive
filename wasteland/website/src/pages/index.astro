@@ -73,11 +73,12 @@ import PaperNote from '../components/PaperNote.astro';
 
     <section class="prealpha-gate">
       <div class="prealpha-label">Pre-Alpha Group Cap</div>
-      <div class="prealpha-count"><span class="prealpha-current">3</span> / 10 spots filled</div>
+      <div class="prealpha-count"><span class="prealpha-current">3</span> / 20 spots filled</div>
       <div class="prealpha-bar">
-        <div class="prealpha-fill" style="width: 30%"></div>
+        <div class="prealpha-fill" style="width: 15%"></div>
       </div>
-      <p class="prealpha-note">When the bar hits 10, abrasive closes to new pre-alpha users until it's ready for more.</p>
+      <p class="prealpha-note">I can only handle about 20 pre-alpha users right now. If we hit the cap, new signups pause until I'm ready for more.</p>
+      <a class="prealpha-cta" data-auth="signed-out" href="/dashboard/sign-up">Sign up free</a>
     </section>
 
     <div class="spacer"></div>
@@ -89,53 +90,73 @@ import PaperNote from '../components/PaperNote.astro';
     min-height: 40vh;
   }
   .prealpha-gate {
-    width: 100%;
-    max-width: 520px;
+    width: min(100%, 720px);
     margin: 5rem auto 2rem;
-    padding: 1.75rem 2rem;
+    padding: 0 2rem;
     text-align: center;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    background: rgba(255, 255, 255, 0.02);
   }
   .prealpha-label {
-    font-size: 0.78rem;
+    font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+    font-size: 0.82rem;
     color: var(--muted);
     text-transform: uppercase;
     letter-spacing: 0.14em;
-    font-weight: 600;
-    margin-bottom: 0.55rem;
+    font-weight: 500;
+    margin-bottom: 0.5rem;
   }
   .prealpha-count {
     font-family: "Figtree", -apple-system, sans-serif;
-    font-size: 1.6rem;
+    font-size: 2rem;
     font-weight: 700;
     color: var(--fg);
-    letter-spacing: -0.02em;
-    margin-bottom: 1rem;
+    letter-spacing: -0.035em;
+    margin-bottom: 1.25rem;
   }
   .prealpha-current {
     color: #e8b931;
   }
   .prealpha-bar {
     width: 100%;
-    height: 14px;
+    height: 6px;
     background: rgba(255, 255, 255, 0.06);
-    border: 1px solid var(--border);
-    border-radius: 7px;
+    border-radius: 3px;
     overflow: hidden;
   }
   .prealpha-fill {
     height: 100%;
     background: linear-gradient(90deg, #e8b931, #d4872e);
-    border-radius: 7px;
+    border-radius: 3px;
     transition: width 0.4s ease;
   }
   .prealpha-note {
-    font-size: 0.82rem;
+    font-size: 0.9rem;
     color: var(--muted);
     margin-top: 1rem;
-    line-height: 1.4;
+    line-height: 1.55;
+    max-width: 440px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .prealpha-cta {
+    display: inline-block;
+    margin-top: 1.5rem;
+    background: rgb(11, 138, 15);
+    color: #fff;
+    font-weight: 500;
+    font-size: 0.95rem;
+    letter-spacing: -0.0175em;
+    padding: 0.6rem 1.25rem;
+    border-radius: 0.25em;
+    text-decoration: none;
+    transition: background 0.15s ease;
+  }
+  .prealpha-cta:hover,
+  .prealpha-cta:focus {
+    background: rgb(60, 175, 55);
+    color: #fff;
+  }
+  .prealpha-cta[hidden] {
+    display: none;
   }
   .founder-letter {
     --letter-base: max(1.15rem, 1.55vw);
