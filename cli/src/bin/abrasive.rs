@@ -463,20 +463,46 @@ fn spawn_agent_for_next_time() {
 }
 
 fn stream_build_output(stream: &mut Conn) -> CliResult<ExitCode> {
+    let mut stdout_buf = Vec::<u8>::new();
+    let mut stderr_buf = Vec::<u8>::new();
     loop {
         match recv_frame(stream)? {
             Message::BuildStdout(data) => {
-                io::stderr().write_all(b"[REMOTE] ")?;
-                io::stdout().write_all(&data)?;
+                stdout_buf.extend_from_slice(&data);
+                flush_complete_lines(&mut stdout_buf, &mut io::stdout())?;
             }
             Message::BuildStderr(data) => {
-                io::stderr().write_all(b"[REMOTE] ")?;
-                io::stderr().write_all(&data)?;
+                stderr_buf.extend_from_slice(&data);
+                flush_complete_lines(&mut stderr_buf, &mut io::stderr())?;
             }
-            Message::BuildFinished { exit_code } => break Ok(ExitCode::from(exit_code)),
+            Message::BuildFinished { exit_code } => {
+                flush_trailing(&mut stdout_buf, &mut io::stdout())?;
+                flush_trailing(&mut stderr_buf, &mut io::stderr())?;
+                break Ok(ExitCode::from(exit_code));
+            }
             _ => {}
         }
     }
+}
+
+fn flush_complete_lines(buf: &mut Vec<u8>, out: &mut impl Write) -> io::Result<()> {
+    while let Some(pos) = buf.iter().position(|b| *b == b'\n') {
+        out.write_all(b"[REMOTE] ")?;
+        out.write_all(&buf[..=pos])?;
+        buf.drain(..=pos);
+    }
+    Ok(())
+}
+
+fn flush_trailing(buf: &mut Vec<u8>, out: &mut impl Write) -> io::Result<()> {
+    if buf.is_empty() {
+        return Ok(());
+    }
+    out.write_all(b"[REMOTE] ")?;
+    out.write_all(buf)?;
+    out.write_all(b"\n")?;
+    buf.clear();
+    Ok(())
 }
 
 #[derive(Deserialize)]
