@@ -9,6 +9,16 @@ import cuddlyferris from '../assets/cuddlyferris.svg'
 export default function SignIn() {
   const [checked, setChecked] = useState(false)
   const [session, setSession] = useState<Session | null>(null)
+  const isSignup = window.location.pathname.includes('sign-up')
+
+  const signIn = () => {
+    const next = new URLSearchParams(window.location.search).get('next')
+    const redirectTo = window.location.origin + (next || '/dashboard')
+    supabase.auth.signInWithOAuth({
+      provider: 'github',
+      options: { redirectTo },
+    })
+  }
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -22,26 +32,17 @@ export default function SignIn() {
     if (session) {
       const next = new URLSearchParams(window.location.search).get('next') || '/'
       navigate(next)
+    } else if (isSignup) {
+      signIn()
     }
-  }, [checked, session])
-
-  const signIn = () => {
-    const next = new URLSearchParams(window.location.search).get('next')
-    const redirectTo = window.location.origin + (next || '/dashboard')
-    supabase.auth.signInWithOAuth({
-      provider: 'github',
-      options: { redirectTo },
-    })
-  }
+  }, [checked, session, isSignup])
 
   if (!checked) return <main className="gate"><p>Loading…</p></main>
   if (session) return <main className="gate"><p>Redirecting…</p></main>
+  if (isSignup) return <main className="gate"><p>Redirecting to GitHub…</p></main>
 
-  const isSignup = window.location.pathname.includes('sign-up')
-  const title = isSignup
-    ? 'Start your free abrasive account'
-    : 'This page requires authentication'
-  const buttonText = isSignup ? 'Sign up with GitHub' : 'Log in with GitHub'
+  const title = 'This page requires authentication'
+  const buttonText = 'Log in with GitHub'
 
   return (
     <div className="app">
