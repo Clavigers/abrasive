@@ -4,10 +4,13 @@
 [DESIGN] Convert the half slop image on the web page into a fully non slop vector thing
 
 [INFRA] Get a real domain like abrasive-rs or abrasivebuild or something
-[INFRA] put abrasive on 1 million package managers
-[INFRA] Stand up reverse proxy (nginx/caddy) in front of the daemon on a real domain, terminate TLS there with Let's Encrypt — prerequisite for OAuth redirect URIs working
-[INFRA] After proxy lands: rip rustls + cert handling out of the daemon, have it accept plain TCP on loopback; delete certs/server.crt + server.key + the bundled cert in cli/tls.rs
-[INFRA] After proxy lands: switch CLI to public-CA trust (webpki-roots or system roots) instead of the bundled self-signed cert; can collapse cli/src/tls.rs to a single tungstenite::connect call
+
+[DIST] Per-target release tarballs with cargo-dist-compatible naming (`abrasive-<version>-<target-triple>.tar.{gz,xz}`) produced by the worker-cluster cross-build — Linux x86_64, Linux aarch64, maybe musl, macOS (once Mac worker lands)
+[DIST] Generate `dist-manifest.json` alongside tarballs so `cargo binstall abrasive` works out of the box
+[DIST] Generate + publish Homebrew tap formula on release (push formula to tap repo)
+[DIST] Generate shell installer (`curl | sh`) that detects OS/arch and pulls the right target tarball
+[DIST] Upload release artifacts to GitHub Release on tag push — the hosting layer Homebrew, binstall, and the shell installer all point at
+[DIST] Execution strategy: literally `cp` cargo-dist's source for the pieces above into abrasive and only change what's needed to wire them to our artifact/release flow — don't reimplement. Gets the accumulated edge-case handling for free. Apache/MIT, so copying is fine; preserve copyright headers. Deliberately out of scope for now: MSI, Authenticode, Apple notarization, npm wrapper, .deb/.rpm — add only when a user asks
 
 [MARKETING] Make a real demo video
 [MARKETING] Make The getting started page real and good
