@@ -2,26 +2,33 @@
 
 ## V0 (blocking launch)
 
-[CAS] New crate `abrasive-rustc-wrapper` that the daemon spawns as `RUSTC_WRAPPER`; first version is pure passthrough, just logs the rustc invocation it sees
-[CAS] Wire the daemon's cargo spawn to set `RUSTC_WRAPPER=/path/to/abrasive-rustc-wrapper`
-[CAS] Parse rustc command line in the wrapper: extract `--crate-name`, source root, `--out-dir`, `--extern` deps with `.rmeta` paths, `-C` flags, edition, target, etc.
-[CAS] Compute a content hash per invocation: hash of crate source tree (covers proc macros + build.rs correctly), hash of all dep `.rmeta`s, normalized rustc flags (with `-C incremental`, `-C metadata`, output filenames stripped), rustc version, env hash (see [ENV])
-[CAS] Source CAS: sync writes blobs to `~/.abrasive/cas/<prefix>/<hash>` (chmod 444); workspaces are hardlink farms over the CAS; teardown is `rm -rf <workspace>`; CAS blobs reaped when link count drops to 1
-[CAS] Unified blob store — source files, rlibs, rmetas, build-script outputs all live in the same CAS keyed by blake3 hash; add a small kind tag only if needed for eviction policy
-[CAS] Network CAS service: local per-worker hardlink cache + shared network CAS as source of truth; worker fetches misses on demand
-[CAS] Gap-fill step checks CAS before asking client for missing blobs — this is the cross-user dedup payoff
-[CAS] Include a fleet-snapshot marker (hash of `/var/lib/dpkg/status` or worker image digest) in the CAS key root so `apt upgrade` on the builder partitions old/new entries cleanly
-[CAS] On cache hit: hardlink cached rlib/rmeta into the location cargo expected (rename to match `--out-dir`/filename cargo asked for), skip rustc
-[CAS] On cache miss with non-incremental rustc: run rustc, upload outputs to CAS after success
-[CAS] On cache miss with incremental rustc: run rustc, do NOT cache (output is nondeterministic)
-[CAS] Atomic cache writes via temp-file-then-rename so concurrent slot builds can't corrupt entries
-[CAS] Use `--remap-path-prefix` for workspace, `$CARGO_HOME`, and the rustc sysroot so embedded paths are machine-independent
-[CAS] Cache build script outputs separately, keyed on (build script source hash, declared env vars, target triple, fleet-snapshot marker)
-[CAS] Denylist of crates known to be non-deterministic (anything embedding git rev, build time, hostname) — wrapper skips caching them
-[CAS] Capacity-based LRU eviction when the CAS grows beyond a configured size
-[CAS] Lazy reaper: weekly job that drops CAS blobs with link count 1
+[DROP-POINT] New crate `drop-point` — cargo-aware build-output cache, publishable standalone; library surface is roughly `lookup(action_key) -> Option<ActionEntry>` / `store(action_key, outputs)` where an entry is `[(output_path, blob_hash), ...]` pointing into the shared blob store (see [BLOBS])
+[DROP-POINT] Action-cache / blob split enables early cutoff: downstream crates depend on dep rmeta *blob hashes*, not dep source hashes — comment-only edits to a leaf don't invalidate the downstream subtree
+[DROP-POINT] New crate `abrasive-rustc-wrapper` — the thing cargo invokes as RUSTC_WRAPPER; parses argv, computes action key, calls drop-point, either materializes hit (hardlink blobs to `--out-dir`) or execs rustc + uploads outputs
+[DROP-POINT] Wire the daemon's cargo spawn to set `RUSTC_WRAPPER=/path/to/abrasive-rustc-wrapper`
+[DROP-POINT] Parse rustc argv in the wrapper: extract `--crate-name`, source root, `--out-dir`, `--extern` deps with `.rmeta` paths, `-C` flags, edition, target
+[DROP-POINT] Compute action key: crate source tree hash (covers proc macros + build.rs correctly), dep `.rmeta` hashes, normalized rustc flags (strip `-C incremental`, `-C metadata`, output filenames), rustc version, env hash (see [ENV]), fleet-snapshot marker
+[DROP-POINT] Fleet-snapshot marker (hash of worker image digest or `/var/lib/dpkg/status`) in the key root so builder upgrades partition old/new entries cleanly
+[DROP-POINT] Use `--remap-path-prefix` for workspace, `$CARGO_HOME`, and the rustc sysroot so embedded paths are machine-independent
+[DROP-POINT] On cache miss, non-incremental: run rustc, upload outputs to blob store, write action-cache entry
+[DROP-POINT] On cache miss, incremental: run rustc, do NOT cache (output is nondeterministic)
+[DROP-POINT] Cache build-script outputs separately, keyed on (build script source hash, declared env vars, target triple, fleet-snapshot marker)
+[DROP-POINT] Denylist crates known to be non-deterministic (anything embedding git rev, build time, hostname) — wrapper skips caching them
+[DROP-POINT] Pipelined rmeta serving: on hit, return `.rmeta` immediately even if `.rlib` is still materializing, matching cargo's own pipelining so downstream type-check doesn't wait on upstream codegen
 
-[ORCH] Split daemon into orchestrator (routing, quotas, auth, CAS gateway) and N builder workers
+[SYNC] Source sync writes each received file as a blob in the shared blob store (see [BLOBS]); workspace materialization is a hardlink tree over the blob store
+[SYNC] Blobs chmod 444 in the blob store so build scripts can't silently mutate shared state — EACCES surfaces the problem immediately
+[SYNC] Workspace teardown is `rm -rf <workspace>` (just unlinks hardlinks); blob refcount drops naturally
+[SYNC] Gap-fill during sync checks local + network blob store before asking client for missing blobs — enables cross-user dedup on overlapping source trees
+[SYNC] Keep the existing stat-fingerprint probe + speculative-diff send; CAS gap-fill only kicks in when the speculative send left holes
+
+[BLOBS] Shared blake3-addressed blob store consumed by both [DROP-POINT] and [SYNC]; local replica at `~/.abrasive/blobs/<prefix>/<hash>` on each worker
+[BLOBS] Network blob service as source of truth across workers; per-worker local replica fetches misses on demand
+[BLOBS] Atomic writes via temp-file-then-rename so concurrent builds can't corrupt entries
+[BLOBS] Capacity-based LRU eviction when a local replica grows beyond its configured size
+[BLOBS] Lazy reaper: weekly job drops local blobs with link count 1; network store uses refcount-aware eviction
+
+[ORCH] Split daemon into orchestrator (routing, quotas, auth, blob-store gateway) and N builder workers
 [ORCH] Orchestrator maintains `(team, scope, user, target) → (worker, workspace)` affinity; sticky until the worker dies
 [ORCH] Per-scope concurrency quota enforced by orchestrator, decoupled from per-worker slot counts
 [ORCH] Worker advertises `(target, toolchain, sysroot)` capabilities; orchestrator filters the pool on target match before applying load/affinity
@@ -39,8 +46,8 @@
 [ENV] Plumb an `ABRASIVE_ENV_HASH` env var from CLI → BuildRequest → daemon → wrapper; mix it into the per-crate cache key
 
 [METRICS] Per-user build counter (for the free-tier cap, e.g. 10k/mo)
-[METRICS] Per-org disk footprint in CAS (sum of referenced blob bytes)
-[METRICS] Build history table: `{build_id, user, org, scope, target, started_at, finished_at, exit_code, bytes_downloaded_from_cas, cache_hit_rate}`
+[METRICS] Per-org disk footprint in the blob store (sum of referenced blob bytes)
+[METRICS] Build history table: `{build_id, user, org, scope, target, started_at, finished_at, exit_code, bytes_downloaded_from_blobs, cache_hit_rate}`
 [METRICS] In-progress builds endpoint from orchestrator (for a dashboard view)
 [METRICS] Surface usage to the dashboard; reuse the existing Supabase schema patterns
 
