@@ -17,22 +17,22 @@ import PaperNote from '../components/PaperNote.astro';
       <span>BUILDS</span>
     </div>
     <div class="brand-banner-inner">
-      <Image src={abrasiveLetters} alt="ABRASIVE" class="brand-letters" />
-      <Image src={trifoil} alt="Claviger" class="brand-trifoil" />
+      <Image src={abrasiveLetters} alt="ABRASIVE" class="brand-letters" widths={[380, 760]} sizes="380px" />
+      <Image src={trifoil} alt="Claviger" class="brand-trifoil" width={160} />
     </div>
   </div>
   <main>
     <div class="hero">
       <div class="hero-image">
         <div class="logo-wrap">
-          <Image src={abrasiveBlock} alt="ABRASIVE" class="logo" />
+          <Image src={abrasiveBlock} alt="ABRASIVE" class="logo" widths={[480, 960]} sizes="480px" loading="eager" fetchpriority="high" />
           <div class="logo-tooltip" role="tooltip">
             <span class="chip">Please excuse my slop</span>
             If you or someone you know is proficient in 3D software and wants to make an actual 3D model I could use for this, please let me know. I'd be happy to pay a real human artist for a better image!
           </div>
         </div>
         <a href="https://www.redbubble.com/" class="sticker-link" aria-label="Stickers" target="_blank" rel="noopener noreferrer">
-          <Image src={likeADog} alt="" class="sticker" />
+          <Image src={likeADog} alt="" class="sticker" widths={[340, 680]} sizes="340px" />
         </a>
       </div>
       <div class="cta">
