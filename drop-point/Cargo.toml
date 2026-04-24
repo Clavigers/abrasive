@@ -6,3 +6,8 @@ description = "Remote cargo build-output cache. Placeholder, not functional yet.
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/Clavigers/abrasive"
+
+[dependencies]
+log = "0.4"
+env_logger = "0.11"
+thiserror = "2"
