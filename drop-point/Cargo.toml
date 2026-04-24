@@ -1,0 +1,8 @@
+[package]
+name = "drop-point"
+version = "0.0.1"
+edition = "2024"
+description = "Remote cargo build-output cache. Placeholder, not functional yet."
+license = "MIT OR Apache-2.0"
+readme = "README.md"
+repository = "https://github.com/Clavigers/abrasive"

@@ -5,6 +5,7 @@ on:
     branches: [master]
     paths:
       - "daemon/**"
+      - "drop-point/**"
       - "protocol/**"
       - "certs/server.crt"
       - ".github/workflows/deploy-daemon.yml"
@@ -25,9 +26,12 @@ jobs:
             cd /root/abrasive
             git fetch origin master
             git reset --hard origin/master
+            rm -f /root/.cargo/config.toml
+            cargo install --path drop-point --locked --force
             cd daemon
             cargo build --release
             install -m644 ../certs/server.crt server.crt
             install -m644 deploy/abrasived.service /etc/systemd/system/abrasived.service
+            install -D -m644 deploy/config.toml /root/.cargo/config.toml
             systemctl daemon-reload
             systemctl restart abrasived
