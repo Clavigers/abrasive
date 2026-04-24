@@ -140,7 +140,7 @@ fn serve_build(
         return reject_busy(stream, peer, &team, &scope);
     };
     println!("[{peer}] acquired slot {}", slot.index);
-    let workspace = setup_workspace(&slot, &team, &scope, peer)?;
+    let workspace = setup_workspace(&slot, &team, &scope)?;
     if fingerprints.matches(&slot, &team, &scope, &probe.fingerprint) {
         fast_path(stream, peer, &workspace, probe.request)
     } else {
@@ -346,11 +346,15 @@ fn setup_workspace(
     slot: &SlotGuard,
     team: &str,
     scope: &str,
-    peer: &str,
 ) -> Result<PathBuf, DaemonError> {
     let workspace = slot.workspace(team, scope);
     fs::create_dir_all(&workspace)?;
-    ensure_target_on_tmpfs(&workspace, slot, team, scope, peer);
+    let target_link = workspace.join("target");
+    if let Ok(meta) = fs::symlink_metadata(&target_link) {
+        if meta.file_type().is_symlink() {
+            let _ = fs::remove_file(&target_link);
+        }
+    }
     Ok(workspace)
 }
 
@@ -456,52 +460,6 @@ fn hash_file(path: &Path) -> Option<[u8; 32]> {
     Some(*blake3::hash(&data).as_bytes())
 }
 
-/// Make `<workspace>/target` live on tmpfs (/dev/shm) so cargo's
-/// write-heavy build artifacts skip the disk entirely. We do this with
-/// a symlink rather than a mount so we don't need root or namespacing.
-fn ensure_target_on_tmpfs(workspace: &Path, slot: &SlotGuard, team: &str, scope: &str, peer: &str) {
-    let tmpfs_target = slot.tmpfs_target(team, scope);
-    let target_link = workspace.join("target");
-    if let Err(e) = fs::create_dir_all(&tmpfs_target) {
-        println!("[{peer}] tmpfs target unavailable ({e}); falling back to disk");
-        return;
-    }
-    wire_up_target_symlink(&target_link, &tmpfs_target, peer);
-}
-
-fn wire_up_target_symlink(target_link: &Path, tmpfs_target: &Path, peer: &str) {
-    match fs::symlink_metadata(target_link) {
-        Ok(meta) if meta.file_type().is_symlink() => {
-            warn_if_symlink_mismatch(target_link, tmpfs_target, peer)
-        }
-        Ok(_) => println!(
-            "[{peer}] target/ is a real directory; leaving alone (delete it manually to enable tmpfs)"
-        ),
-        Err(_) => create_target_symlink(target_link, tmpfs_target, peer),
-    }
-}
-
-fn warn_if_symlink_mismatch(target_link: &Path, tmpfs_target: &Path, peer: &str) {
-    if fs::read_link(target_link).ok().as_deref() != Some(tmpfs_target) {
-        println!("[{peer}] target/ is a symlink to something else; leaving alone");
-    }
-}
-
-#[cfg(unix)]
-fn create_target_symlink(target_link: &Path, tmpfs_target: &Path, peer: &str) {
-    if let Err(e) = std::os::unix::fs::symlink(tmpfs_target, target_link) {
-        println!(
-            "[{peer}] failed to symlink target -> {}: {e}",
-            tmpfs_target.display()
-        );
-    } else {
-        println!("[{peer}] target/ -> {}", tmpfs_target.display());
-    }
-}
-
-#[cfg(not(unix))]
-fn create_target_symlink(_target_link: &Path, _tmpfs_target: &Path, _peer: &str) {}
-
 fn run_build(stream: &mut WsConn, peer: &str, workspace: &Path, req: BuildRequest) {
     if req.cargo_args.first().map_or(false, |c| c == "nop") {
         println!("[{peer}] nop (sync only)");
@@ -581,11 +539,8 @@ fn send_spawn_failure(stream: &mut WsConn, e: &std::io::Error) {
     let _ = send_msg(stream, &Message::BuildFinished { exit_code: 1 });
 }
 
-/// Cargo clean normally just deletes the `target/` symlink we set up, leaving
-/// the actual tmpfs cache untouched. This wipes the tmpfs target's contents
-/// directly so a follow-up build genuinely starts cold.
 fn handle_clean(stream: &mut WsConn, peer: &str, workspace: &Path) {
-    match clean_tmpfs_target(workspace) {
+    match clean_target(workspace) {
         Ok((files, bytes)) => {
             let mib = bytes as f64 / (1024.0 * 1024.0);
             let line = format!("     Removed {files} files, {mib:.1}MiB total\n");
@@ -601,22 +556,17 @@ fn handle_clean(stream: &mut WsConn, peer: &str, workspace: &Path) {
     let _ = send_msg(stream, &Message::BuildFinished { exit_code: 0 });
 }
 
-fn clean_tmpfs_target(workspace: &Path) -> std::io::Result<(usize, u64)> {
-    let target_link = workspace.join("target");
-    let tmpfs_target = fs::read_link(&target_link)?;
-    let (files, bytes) = tmpfs_dir_size(&tmpfs_target);
-    for entry in fs::read_dir(&tmpfs_target)? {
-        let path = entry?.path();
-        if path.is_dir() {
-            fs::remove_dir_all(&path)?;
-        } else {
-            fs::remove_file(&path)?;
-        }
+fn clean_target(workspace: &Path) -> std::io::Result<(usize, u64)> {
+    let target = workspace.join("target");
+    if !target.exists() {
+        return Ok((0, 0));
     }
+    let (files, bytes) = dir_size(&target);
+    fs::remove_dir_all(&target)?;
     Ok((files, bytes))
 }
 
-fn tmpfs_dir_size(path: &Path) -> (usize, u64) {
+fn dir_size(path: &Path) -> (usize, u64) {
     let mut files = 0;
     let mut bytes = 0;
     for entry in walkdir::WalkDir::new(path).into_iter().filter_map(Result::ok) {

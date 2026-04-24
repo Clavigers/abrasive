@@ -85,13 +85,6 @@ impl SlotGuard {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
         PathBuf::from(format!("{home}/{team}_{scope}/slot{}", self.index))
     }
-
-    pub fn tmpfs_target(&self, team: &str, scope: &str) -> PathBuf {
-        PathBuf::from(format!(
-            "/dev/shm/abrasive-targets/{team}_{scope}/slot{}",
-            self.index
-        ))
-    }
 }
 
 impl Drop for SlotGuard {
