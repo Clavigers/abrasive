@@ -6,6 +6,7 @@ use std::io::Write;
 use std::process::{Command, exit};
 
 mod digest;
+mod disk_cache;
 mod rustc_args;
 use rustc_args::{ParseOutcome, parse_arguments};
 
