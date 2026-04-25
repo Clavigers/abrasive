@@ -5,13 +5,13 @@ use std::ffi::{OsStr, OsString};
 use std::io::Write;
 use std::process::{Command, exit};
 
+mod digest;
 mod rustc_args;
 use rustc_args::{ParseOutcome, parse_arguments};
 
 fn main() {
     init_logger();
     let (rustc, rest) = parse_args();
-    log_command(&rustc, &rest);
     try_parse_rustc(&rest);
     run_rustc(&rustc, &rest);
 }
@@ -41,15 +41,6 @@ fn parse_args() -> (OsString, Vec<OsString>) {
     };
     let rest: Vec<_> = args.collect();
     (rustc, rest)
-}
-
-fn log_command(rustc: &OsStr, rest: &[OsString]) {
-    let mut cmdline = rustc.to_string_lossy().into_owned();
-    for a in rest {
-        cmdline.push(' ');
-        cmdline.push_str(&a.to_string_lossy());
-    }
-    debug!("  {cmdline}");
 }
 
 fn try_parse_rustc(rest: &[OsString]) {
