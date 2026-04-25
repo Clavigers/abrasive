@@ -77,6 +77,7 @@ fn plan_third_party_cache(rest: &[OsString]) -> Option<(ParsedArguments, String)
         return None;
     }
     let key = hasher.finalize().to_hex().to_string();
+    info!("plan: {} key={} argv={:?}", parsed.crate_name, key, rest);
     Some((parsed, key))
 }
 
@@ -95,17 +96,25 @@ fn is_third_party(input: &Path) -> bool {
 }
 
 fn try_serve_from_cache(parsed: &ParsedArguments, key: &str) -> bool {
-    let Ok(cache) = DiskCache::new(cache_root()) else {
+    let root = cache_root();
+    let Ok(cache) = DiskCache::new(root.clone()) else {
+        info!("get-miss: DiskCache::new failed at {}", root.display());
         return false;
     };
     let Some(src) = cache.get(key) else {
+        info!(
+            "get-miss: {} key={} root={}",
+            parsed.crate_name,
+            key,
+            root.display()
+        );
         return false;
     };
     if let Err(e) = hardlink_into(&src, &parsed.output_dir) {
         warn!("drop-point: cache hit but materialize failed: {e}");
         return false;
     }
-    info!("hit {} {}", parsed.crate_name, &key[..16]);
+    info!("hit {} {}", parsed.crate_name, key);
     true
 }
 
@@ -128,9 +137,22 @@ fn save_outputs(
     parsed: &ParsedArguments,
     key: &str,
 ) -> io::Result<()> {
-    let cache = DiskCache::new(cache_root())?;
-    if cache.put(key, |dst| copy_outputs_into(rustc, rest, parsed, dst))? {
-        info!("cached {} {}", parsed.crate_name, &key[..16]);
+    let root = cache_root();
+    let final_path = root.join(&key[0..1]).join(&key[1..2]).join(key);
+    let pre_exists = final_path.is_dir();
+    let cache = DiskCache::new(root.clone())?;
+    let wrote = cache.put(key, |dst| copy_outputs_into(rustc, rest, parsed, dst))?;
+    info!(
+        "put: {} key={} root={} pre_exists={} wrote={} final_exists_now={}",
+        parsed.crate_name,
+        key,
+        root.display(),
+        pre_exists,
+        wrote,
+        final_path.is_dir(),
+    );
+    if wrote {
+        info!("cached {} {}", parsed.crate_name, key);
     }
     Ok(())
 }
