@@ -19,11 +19,9 @@ use rustc_args::{ParseOutcome, ParsedArguments, parse_arguments};
 fn main() {
     init_logger();
     let (rustc, rest) = parse_args();
-    // EXPERIMENT: dump the parsed args for every invocation, skip the cache.
+    // EXPERIMENT: dump the raw argv for every invocation, skip the cache.
     // Restore the cache hit / cache write blocks below to re-enable.
-    if let Ok(cwd) = env::current_dir() {
-        info!("parse: {:#?}", parse_arguments(&rest, &cwd));
-    }
+    info!("argv: {rest:?}");
     // let plan = plan_third_party_cache(&rest);
     // if let Some((parsed, key)) = &plan
     //     && try_serve_from_cache(parsed, key)
