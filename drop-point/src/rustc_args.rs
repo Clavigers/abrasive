@@ -3,11 +3,14 @@
 // with all the generic machinery removed, also lightly updated for 2026 rust.
 
 use std::cmp::Ordering;
+use std::collections::HashSet;
 use std::ffi::OsString;
 use std::fmt::Debug;
 use std::marker::PhantomData;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str;
+use std::sync::LazyLock;
+use log::debug;
 use thiserror::Error;
 
 pub type ArgParseResult<T> = Result<T, ArgParseError>;
@@ -621,6 +624,630 @@ macro_rules! take_arg {
             ArgDisposition::$d(Some($x)),
         )
     };
+}
+
+/// The state of `--color` options passed to the compiler.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum ColorMode {
+    Off,
+    On,
+    #[default]
+    Auto,
+}
+
+/// Possible results of parsing argv. Generic over `T` so the same outcome
+/// shape works for any flag-set parser, not just rustc's.
+#[derive(Debug, PartialEq, Eq)]
+pub enum ParseOutcome<T> {
+    /// Commandline can be handled.
+    Ok(T),
+    /// Cannot cache this compilation.
+    CannotCache(&'static str, Option<String>),
+    /// This commandline is not a compile.
+    NotCompilation,
+}
+
+macro_rules! cannot_cache {
+    ($why:expr) => {
+        return ParseOutcome::CannotCache($why, None)
+    };
+    ($why:expr, $extra_info:expr) => {
+        return ParseOutcome::CannotCache($why, Some($extra_info))
+    };
+}
+
+macro_rules! try_or_cannot_cache {
+    ($arg:expr, $why:expr) => {{
+        match $arg {
+            Ok(arg) => arg,
+            Err(e) => cannot_cache!($why, e.to_string()),
+        }
+    }};
+}
+
+// =============================================================================
+// Concrete rustc argument parsing
+// =============================================================================
+//
+// Everything above is generic over the argument-data type T and could parse
+// any flag-style CLI. Below is the rustc-specific layer: the ParsedArguments
+// struct (the typed result of parsing a rustc invocation), the ArgData enum
+// that names each typed value rustc cares about, the ARGS table that
+// describes every flag rustc accepts, and the parse_arguments function that
+// walks an argv into a ParsedArguments.
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ParsedArguments {
+    /// The full commandline, with all parsed arguments.
+    arguments: Vec<Argument<ArgData>>,
+    /// The location of compiler outputs.
+    output_dir: PathBuf,
+    /// Paths to extern crates used in the compile.
+    externs: Vec<PathBuf>,
+    /// The directories searched for rlibs.
+    crate_link_paths: Vec<PathBuf>,
+    /// Static libraries linked to in the compile.
+    staticlibs: Vec<PathBuf>,
+    /// The crate name passed to --crate-name.
+    crate_name: String,
+    /// The crate types that will be generated.
+    crate_types: CrateTypes,
+    /// If dependency info is being emitted, the name of the dep info file.
+    dep_info: Option<PathBuf>,
+    /// If `-C profile-use=PATH` was passed, the path to the profile data file.
+    /// See https://doc.rust-lang.org/rustc/profile-guided-optimization.html
+    profile: Option<PathBuf>,
+    /// Set of `--emit` modes requested.
+    /// rustc says it emits .rlib for `--emit=metadata`,
+    /// see https://github.com/rust-lang/rust/issues/54852
+    emit: HashSet<String>,
+    /// The value of any `--color` option passed on the commandline.
+    color_mode: ColorMode,
+    /// Whether `--json` was passed to this invocation.
+    has_json: bool,
+    /// A `--target` parameter that specifies a path to a JSON file.
+    target_json: Option<PathBuf>,
+}
+
+/// The selection of crate types for this compilation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CrateTypes {
+    rlib: bool,
+    staticlib: bool,
+}
+
+/// `--emit` modes that the parser will accept as cacheable. Anything outside
+/// this set causes `parse_arguments` to return `CannotCache` so the wrapper
+/// runs rustc directly and bypasses the cache layer.
+static ALLOWED_EMIT: LazyLock<HashSet<&'static str>> =
+    LazyLock::new(|| ["link", "metadata", "dep-info"].iter().copied().collect());
+
+macro_rules! make_os_string {
+    ($( $v:expr ),*) => {{
+        let mut s = OsString::new();
+        $(
+            s.push($v);
+        )*
+        s
+    }};
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct ArgCrateTypes {
+    rlib: bool,
+    staticlib: bool,
+    others: HashSet<String>,
+}
+
+impl FromArg for ArgCrateTypes {
+    fn process(arg: OsString) -> ArgParseResult<Self> {
+        let arg = String::process(arg)?;
+        let mut crate_types = ArgCrateTypes {
+            rlib: false,
+            staticlib: false,
+            others: HashSet::new(),
+        };
+        for ty in arg.split(',') {
+            match ty {
+                // It is assumed that "lib" always refers to "rlib", which
+                // is true right now but may not be in the future
+                "lib" | "rlib" => crate_types.rlib = true,
+                "staticlib" => crate_types.staticlib = true,
+                other => {
+                    crate_types.others.insert(other.to_owned());
+                }
+            }
+        }
+        Ok(crate_types)
+    }
+}
+
+impl IntoArg for ArgCrateTypes {
+    fn into_arg_os_string(self) -> OsString {
+        let ArgCrateTypes {
+            rlib,
+            staticlib,
+            others,
+        } = self;
+        let mut types: Vec<_> = others
+            .iter()
+            .map(String::as_str)
+            .chain(if rlib { Some("rlib") } else { None })
+            .chain(if staticlib { Some("staticlib") } else { None })
+            .collect();
+        types.sort_unstable();
+        let types_string = types.join(",");
+        types_string.into()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct ArgLinkLibrary {
+    kind: String,
+    name: String,
+}
+
+impl FromArg for ArgLinkLibrary {
+    fn process(arg: OsString) -> ArgParseResult<Self> {
+        let (kind, name) = match split_os_string_arg(arg, "=")? {
+            (kind, Some(name)) => (kind, name),
+            // If no kind is specified, the default is dylib.
+            (name, None) => ("dylib".to_owned(), name),
+        };
+        Ok(ArgLinkLibrary { kind, name })
+    }
+}
+
+impl IntoArg for ArgLinkLibrary {
+    fn into_arg_os_string(self) -> OsString {
+        let ArgLinkLibrary { kind, name } = self;
+        make_os_string!(kind, "=", name)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct ArgLinkPath {
+    kind: String,
+    path: PathBuf,
+}
+
+impl FromArg for ArgLinkPath {
+    fn process(arg: OsString) -> ArgParseResult<Self> {
+        let (kind, path) = match split_os_string_arg(arg, "=")? {
+            (kind, Some(path)) => (kind, path),
+            // If no kind is specified, the path is used to search for all kinds
+            (path, None) => ("all".to_owned(), path),
+        };
+        Ok(ArgLinkPath {
+            kind,
+            path: path.into(),
+        })
+    }
+}
+
+impl IntoArg for ArgLinkPath {
+    fn into_arg_os_string(self) -> OsString {
+        let ArgLinkPath { kind, path } = self;
+        make_os_string!(kind, "=", path)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct ArgCodegen {
+    opt: String,
+    value: Option<String>,
+}
+
+impl FromArg for ArgCodegen {
+    fn process(arg: OsString) -> ArgParseResult<Self> {
+        let (opt, value) = split_os_string_arg(arg, "=")?;
+        Ok(ArgCodegen { opt, value })
+    }
+}
+
+impl IntoArg for ArgCodegen {
+    fn into_arg_os_string(self) -> OsString {
+        let ArgCodegen { opt, value } = self;
+        if let Some(value) = value {
+            make_os_string!(opt, "=", value)
+        } else {
+            make_os_string!(opt)
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct ArgUnstable {
+    opt: String,
+    value: Option<String>,
+}
+
+impl FromArg for ArgUnstable {
+    fn process(arg: OsString) -> ArgParseResult<Self> {
+        let (opt, value) = split_os_string_arg(arg, "=")?;
+        Ok(ArgUnstable { opt, value })
+    }
+}
+
+impl IntoArg for ArgUnstable {
+    fn into_arg_os_string(self) -> OsString {
+        let ArgUnstable { opt, value } = self;
+        if let Some(value) = value {
+            make_os_string!(opt, "=", value)
+        } else {
+            make_os_string!(opt)
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct ArgExtern {
+    name: String,
+    path: PathBuf,
+}
+
+impl FromArg for ArgExtern {
+    fn process(arg: OsString) -> ArgParseResult<Self> {
+        if let (name, Some(path)) = split_os_string_arg(arg, "=")? {
+            Ok(ArgExtern {
+                name,
+                path: path.into(),
+            })
+        } else {
+            Err(ArgParseError::Other("no path for extern"))
+        }
+    }
+}
+
+impl IntoArg for ArgExtern {
+    fn into_arg_os_string(self) -> OsString {
+        let ArgExtern { name, path } = self;
+        make_os_string!(name, "=", path)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum ArgTarget {
+    Name(String),
+    Path(PathBuf),
+    Unsure(OsString),
+}
+
+impl FromArg for ArgTarget {
+    fn process(arg: OsString) -> ArgParseResult<Self> {
+        // Is it obviously a json file path?
+        if Path::new(&arg)
+            .extension()
+            .map(|ext| ext == "json")
+            .unwrap_or(false)
+        {
+            return Ok(ArgTarget::Path(arg.into()));
+        }
+        // Time for clever detection - if we append .json (even if it's clearly
+        // a directory, i.e. resulting in /my/dir/.json), does the path exist?
+        let mut path = arg.clone();
+        path.push(".json");
+        if Path::new(&path).is_file() {
+            // Unfortunately, we're now not sure what will happen without having
+            // a list of all the built-in targets handy, as they don't get .json
+            // auto-added for target json discovery
+            return Ok(ArgTarget::Unsure(arg));
+        }
+        // The file doesn't exist so it can't be a path, safe to assume it's a name
+        Ok(ArgTarget::Name(
+            arg.into_string().map_err(ArgParseError::InvalidUnicode)?,
+        ))
+    }
+}
+
+impl IntoArg for ArgTarget {
+    fn into_arg_os_string(self) -> OsString {
+        match self {
+            ArgTarget::Name(s) => s.into(),
+            ArgTarget::Path(p) => p.into(),
+            ArgTarget::Unsure(s) => s,
+        }
+    }
+}
+
+ArgData! {
+    TooHardFlag,
+    TooHardPath(PathBuf),
+    NotCompilationFlag,
+    NotCompilation(OsString),
+    LinkLibrary(ArgLinkLibrary),
+    LinkPath(ArgLinkPath),
+    Emit(String),
+    Extern(ArgExtern),
+    Color(String),
+    Json(String),
+    CrateName(String),
+    CrateType(ArgCrateTypes),
+    OutDir(PathBuf),
+    CodeGen(ArgCodegen),
+    PassThrough(OsString),
+    Target(ArgTarget),
+    Unstable(ArgUnstable),
+}
+
+use self::ArgData::*;
+
+// Taken from rustc's `rustc_optgroups()`:
+// https://github.com/rust-lang/rust/blob/597d9e43be882cdbd218e58c4f7efb2fa3da7540/compiler/rustc_session/src/config.rs#L1764
+static ARGS: &[ArgInfo<ArgData>] = &[
+    flag!("-", TooHardFlag),
+    take_arg!("--allow", OsString, CanBeSeparated(b'='), PassThrough),
+    take_arg!("--cap-lints", OsString, CanBeSeparated(b'='), PassThrough),
+    take_arg!("--cfg", OsString, CanBeSeparated(b'='), PassThrough),
+    take_arg!("--check-cfg", OsString, CanBeSeparated(b'='), PassThrough),
+    take_arg!("--codegen", ArgCodegen, CanBeSeparated(b'='), CodeGen),
+    take_arg!("--color", String, CanBeSeparated(b'='), Color),
+    take_arg!("--crate-name", String, CanBeSeparated(b'='), CrateName),
+    take_arg!("--crate-type", ArgCrateTypes, CanBeSeparated(b'='), CrateType),
+    take_arg!("--deny", OsString, CanBeSeparated(b'='), PassThrough),
+    take_arg!("--diagnostic-width", OsString, CanBeSeparated(b'='), PassThrough),
+    take_arg!("--edition", OsString, CanBeSeparated(b'='), PassThrough),
+    take_arg!("--emit", String, CanBeSeparated(b'='), Emit),
+    take_arg!("--env-set", OsString, CanBeSeparated(b'='), PassThrough),
+    take_arg!("--error-format", OsString, CanBeSeparated(b'='), PassThrough),
+    take_arg!("--explain", OsString, CanBeSeparated(b'='), NotCompilation),
+    take_arg!("--extern", ArgExtern, CanBeSeparated(b'='), Extern),
+    take_arg!("--forbid", OsString, CanBeSeparated(b'='), PassThrough),
+    take_arg!("--force-warn", OsString, CanBeSeparated(b'='), PassThrough),
+    flag!("--help", NotCompilationFlag),
+    take_arg!("--json", String, CanBeSeparated(b'='), Json),
+    take_arg!("--out-dir", PathBuf, CanBeSeparated(b'='), OutDir),
+    take_arg!("--pretty", OsString, CanBeSeparated(b'='), NotCompilation),
+    take_arg!("--print", OsString, CanBeSeparated(b'='), NotCompilation),
+    take_arg!("--remap-path-prefix", OsString, CanBeSeparated(b'='), PassThrough),
+    take_arg!("--remap-path-scope", OsString, CanBeSeparated(b'='), PassThrough),
+    take_arg!("--sysroot", PathBuf, CanBeSeparated(b'='), TooHardPath),
+    take_arg!("--target", ArgTarget, CanBeSeparated(b'='), Target),
+    take_arg!("--unpretty", OsString, CanBeSeparated(b'='), NotCompilation),
+    flag!("--version", NotCompilationFlag),
+    take_arg!("--warn", OsString, CanBeSeparated(b'='), PassThrough),
+    take_arg!("-A", OsString, CanBeSeparated, PassThrough),
+    take_arg!("-C", ArgCodegen, CanBeSeparated, CodeGen),
+    take_arg!("-D", OsString, CanBeSeparated, PassThrough),
+    take_arg!("-F", OsString, CanBeSeparated, PassThrough),
+    take_arg!("-L", ArgLinkPath, CanBeSeparated, LinkPath),
+    flag!("-V", NotCompilationFlag),
+    take_arg!("-W", OsString, CanBeSeparated, PassThrough),
+    take_arg!("-Z", ArgUnstable, CanBeSeparated, Unstable),
+    take_arg!("-l", ArgLinkLibrary, CanBeSeparated, LinkLibrary),
+    take_arg!("-o", PathBuf, CanBeSeparated, TooHardPath),
+];
+
+/// Parse `arguments` as rustc command-line arguments, determine if
+/// we can cache the result of compilation. This is only intended to
+/// cover a subset of rustc invocations, primarily focused on those
+/// that will occur when cargo invokes rustc.
+///
+/// Caveats:
+/// * We don't support compilation from stdin.
+/// * We require --emit.
+/// * We only support `link` and `dep-info` in --emit (and don't support *just* 'dep-info')
+/// * We require `--out-dir`.
+/// * We don't support `-o file`.
+pub fn parse_arguments(arguments: &[OsString], cwd: &Path) -> ParseOutcome<ParsedArguments> {
+    let mut args = vec![];
+
+    let mut emit: Option<HashSet<String>> = None;
+    let mut input = None;
+    let mut output_dir = None;
+    let mut crate_name = None;
+    let mut crate_types = CrateTypes {
+        rlib: false,
+        staticlib: false,
+    };
+    let mut extra_filename = None;
+    let mut externs = vec![];
+    let mut crate_link_paths = vec![];
+    let mut static_lib_names = vec![];
+    let mut static_link_paths: Vec<PathBuf> = vec![];
+    let mut color_mode = ColorMode::Auto;
+    let mut has_json = false;
+    let mut profile = None;
+    let mut target_json = None;
+
+    for (idx, arg) in ArgsIter::new(arguments.iter().cloned(), ARGS).enumerate() {
+        let arg = try_or_cannot_cache!(arg, "argument parse");
+        match arg.get_data() {
+            Some(TooHardFlag) | Some(TooHardPath(_)) => {
+                cannot_cache!(arg.flag_str().expect("Can't be Argument::Raw/UnknownFlag",))
+            }
+            Some(NotCompilationFlag) | Some(NotCompilation(_)) => {
+                return ParseOutcome::NotCompilation;
+            }
+            Some(LinkLibrary(ArgLinkLibrary { kind, name })) => {
+                if kind == "static" {
+                    static_lib_names.push(name.to_owned());
+                }
+            }
+            Some(LinkPath(ArgLinkPath { kind, path })) => {
+                // "crate" is not typically necessary as cargo will normally
+                // emit explicit --extern arguments
+                if kind == "crate" || kind == "dependency" || kind == "all" {
+                    crate_link_paths.push(cwd.join(path));
+                }
+                if kind == "native" || kind == "all" {
+                    static_link_paths.push(cwd.join(path));
+                }
+            }
+            Some(Emit(value)) => {
+                if emit.is_some() {
+                    // We don't support passing --emit more than once.
+                    cannot_cache!("more than one --emit");
+                }
+                emit = Some(value.split(',').map(str::to_owned).collect());
+            }
+            Some(CrateType(ArgCrateTypes {
+                rlib,
+                staticlib,
+                others,
+            })) => {
+                // We can't cache non-rlib/staticlib crates, because rustc invokes the
+                // system linker to link them, and we don't know about all the linker inputs.
+                if !others.is_empty() {
+                    let others: Vec<&str> = others.iter().map(String::as_str).collect();
+                    let others_string = others.join(",");
+                    cannot_cache!("crate-type", others_string)
+                }
+                crate_types.rlib |= rlib;
+                crate_types.staticlib |= staticlib;
+            }
+            Some(CrateName(value)) => crate_name = Some(value.clone()),
+            Some(OutDir(value)) => output_dir = Some(value.clone()),
+            Some(Extern(ArgExtern { path, .. })) => externs.push(path.clone()),
+            Some(CodeGen(ArgCodegen { opt, value })) => match (opt.as_ref(), value) {
+                ("extra-filename", Some(value)) => extra_filename = Some(value.to_owned()),
+                ("extra-filename", None) => cannot_cache!("extra-filename"),
+                ("profile-use", Some(v)) => profile = Some(v.clone()),
+                // drop-point caches incremental builds; see INCREMENTAL.md
+                ("incremental", _) => (),
+                (_, _) => (),
+            },
+            Some(Unstable(_)) => (),
+            Some(Color(value)) => {
+                // We'll just assume the last specified value wins.
+                color_mode = match value.as_ref() {
+                    "always" => ColorMode::On,
+                    "never" => ColorMode::Off,
+                    _ => ColorMode::Auto,
+                };
+            }
+            Some(Json(_)) => {
+                has_json = true;
+            }
+            Some(PassThrough(_)) => (),
+            Some(Target(target)) => match target {
+                ArgTarget::Path(json_path) => target_json = Some(json_path.to_owned()),
+                ArgTarget::Unsure(_) => cannot_cache!("target unsure"),
+                ArgTarget::Name(_) => (),
+            },
+            None => match arg {
+                Argument::Raw(ref val) => {
+                    if idx == 0
+                        && let Some(value) = val.to_str()
+                        && value == "rustc"
+                    {
+                        // If the first argument is rustc, it's likely called via clippy-driver,
+                        // so it's not actually an input file, which means we should discount it.
+                        continue;
+                    }
+                    if input.is_some() {
+                        // Can't cache compilations with multiple inputs.
+                        cannot_cache!(
+                            "multiple input files",
+                            format!("prev = {input:?}, next = {arg:?}")
+                        );
+                    }
+                    input = Some(val.clone());
+                }
+                Argument::UnknownFlag(_) => {}
+                _ => unreachable!(),
+            },
+        }
+        // We'll drop --color arguments, we're going to pass --color=always and the client will
+        // strip colors if necessary.
+        match arg.get_data() {
+            Some(Color(_)) => {}
+            _ => args.push(arg.normalize(NormalizedDisposition::Separated)),
+        }
+    }
+
+    // Unwrap required values.
+    macro_rules! req {
+        ($x:ident) => {
+            let $x = if let Some($x) = $x {
+                $x
+            } else {
+                debug!("Can't cache compilation, missing `{}`", stringify!($x));
+                cannot_cache!(concat!("missing ", stringify!($x)));
+            };
+        };
+    }
+    // We don't actually save the input value, but there needs to be one.
+    req!(input);
+    drop(input);
+    req!(output_dir);
+    req!(emit);
+    req!(crate_name);
+    // We won't cache invocations that are not producing
+    // binary output.
+    if !emit.is_empty() && !emit.contains("link") && !emit.contains("metadata") {
+        return ParseOutcome::NotCompilation;
+    }
+    // If it's not an rlib and not a staticlib then crate-type wasn't passed,
+    // so it will usually be inferred as a binary, though the `#![crate_type`
+    // annotation may dictate otherwise - either way, we don't know what to do.
+    if let CrateTypes {
+        rlib: false,
+        staticlib: false,
+    } = crate_types
+    {
+        cannot_cache!("crate-type", "No crate-type passed".to_owned())
+    }
+    // We won't cache invocations that are outputting anything but
+    // linker output and dep-info.
+    if emit.iter().any(|e| !ALLOWED_EMIT.contains(e.as_str())) {
+        cannot_cache!("unsupported --emit");
+    }
+
+    // Figure out the dep-info filename, if emitting dep-info.
+    let dep_info = if emit.contains("dep-info") {
+        let mut dep_info = crate_name.clone();
+        if let Some(extra_filename) = extra_filename {
+            dep_info.push_str(&extra_filename[..]);
+        }
+        dep_info.push_str(".d");
+        Some(dep_info)
+    } else {
+        None
+    };
+
+    // Ignore profile if `link` is not in emit which means we are running `cargo check`.
+    let profile = if emit.contains("link") { profile } else { None };
+
+    // Locate all static libs specified on the commandline.
+    let staticlibs = static_lib_names
+        .into_iter()
+        .filter_map(|name| {
+            for path in &static_link_paths {
+                for filename in [
+                    format!("lib{}.a", name),
+                    format!("{}.lib", name),
+                    format!("{}.a", name),
+                ] {
+                    let lib_path = path.join(filename);
+                    if lib_path.exists() {
+                        return Some(lib_path);
+                    }
+                }
+            }
+            // rustc will just error if there's a missing static library, so don't worry about
+            // it too much.
+            None
+        })
+        .collect();
+    // Cargo doesn't deterministically order --externs, and we need the hash inputs in a
+    // deterministic order.
+    externs.sort();
+    ParseOutcome::Ok(ParsedArguments {
+        arguments: args,
+        output_dir,
+        crate_types,
+        externs,
+        crate_link_paths,
+        staticlibs,
+        crate_name,
+        dep_info: dep_info.map(|s| s.into()),
+        profile: profile.map(|s| s.into()),
+        emit,
+        color_mode,
+        has_json,
+        target_json,
+    })
 }
 
 #[cfg(test)]
