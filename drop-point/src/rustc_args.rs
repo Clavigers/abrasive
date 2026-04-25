@@ -4,7 +4,9 @@
 
 use std::cmp::Ordering;
 use std::ffi::OsString;
+use std::fmt::Debug;
 use std::marker::PhantomData;
+use std::path::PathBuf;
 use std::str;
 use thiserror::Error;
 
@@ -241,4 +243,54 @@ macro_rules! ArgData {
         }
         ArgData!{ __impl $( $tok )+ }
     };
+}
+
+/// The value associated with a parsed argument.
+pub trait ArgumentValue: IntoArg + Clone + Debug {}
+
+impl<T: IntoArg + Clone + Debug> ArgumentValue for T {}
+
+pub trait FromArg: Sized {
+    fn process(arg: OsString) -> ArgParseResult<Self>;
+}
+
+pub trait IntoArg: Sized {
+    fn into_arg_os_string(self) -> OsString;
+}
+
+impl FromArg for OsString {
+    fn process(arg: OsString) -> ArgParseResult<Self> {
+        Ok(arg)
+    }
+}
+impl FromArg for PathBuf {
+    fn process(arg: OsString) -> ArgParseResult<Self> {
+        Ok(arg.into())
+    }
+}
+impl FromArg for String {
+    fn process(arg: OsString) -> ArgParseResult<Self> {
+        arg.into_string().map_err(ArgParseError::InvalidUnicode)
+    }
+}
+
+impl IntoArg for OsString {
+    fn into_arg_os_string(self) -> OsString {
+        self
+    }
+}
+impl IntoArg for PathBuf {
+    fn into_arg_os_string(self) -> OsString {
+        self.into()
+    }
+}
+impl IntoArg for String {
+    fn into_arg_os_string(self) -> OsString {
+        self.into()
+    }
+}
+impl IntoArg for () {
+    fn into_arg_os_string(self) -> OsString {
+        OsString::new()
+    }
 }
