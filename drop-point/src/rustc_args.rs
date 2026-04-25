@@ -240,7 +240,7 @@ macro_rules! ArgData {
 
     // PartialEq necessary for tests
     { pub $( $tok:tt )+ } => {
-        #[derive(Clone, Debug, PartialEq, Eq)]
+        #[derive(Clone, Debug, PartialEq)]
         pub enum ArgData {
             $($tok)+
         }
@@ -679,9 +679,13 @@ macro_rules! try_or_cannot_cache {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParsedArguments {
     /// The full commandline, with all parsed arguments.
-    arguments: Vec<Argument<ArgData>>,
+    pub(crate) arguments: Vec<Argument<ArgData>>,
+    /// The input source file. For third-party crates this path embeds
+    /// `<registry>/<crate>@<version>/...`, which is sufficient to identify
+    /// the source bytes (crates.io is immutable).
+    pub(crate) input: PathBuf,
     /// The location of compiler outputs.
-    output_dir: PathBuf,
+    pub(crate) output_dir: PathBuf,
     /// Paths to extern crates used in the compile.
     externs: Vec<PathBuf>,
     /// The directories searched for rlibs.
@@ -689,11 +693,11 @@ pub struct ParsedArguments {
     /// Static libraries linked to in the compile.
     staticlibs: Vec<PathBuf>,
     /// The crate name passed to --crate-name.
-    crate_name: String,
+    pub(crate) crate_name: String,
     /// The crate types that will be generated.
     crate_types: CrateTypes,
     /// If dependency info is being emitted, the name of the dep info file.
-    dep_info: Option<PathBuf>,
+    pub(crate) dep_info: Option<PathBuf>,
     /// If `-C profile-use=PATH` was passed, the path to the profile data file.
     /// See https://doc.rust-lang.org/rustc/profile-guided-optimization.html
     profile: Option<PathBuf>,
@@ -706,7 +710,7 @@ pub struct ParsedArguments {
     /// Whether `--json` was passed to this invocation.
     has_json: bool,
     /// A `--target` parameter that specifies a path to a JSON file.
-    target_json: Option<PathBuf>,
+    pub(crate) target_json: Option<PathBuf>,
 }
 
 /// The selection of crate types for this compilation.
@@ -950,7 +954,7 @@ impl IntoArg for ArgTarget {
     }
 }
 
-ArgData! {
+ArgData! { pub
     TooHardFlag,
     TooHardPath(PathBuf),
     NotCompilationFlag,
@@ -1167,9 +1171,7 @@ pub fn parse_arguments(arguments: &[OsString], cwd: &Path) -> ParseOutcome<Parse
             };
         };
     }
-    // We don't actually save the input value, but there needs to be one.
     req!(input);
-    drop(input);
     req!(output_dir);
     req!(emit);
     req!(crate_name);
@@ -1235,6 +1237,7 @@ pub fn parse_arguments(arguments: &[OsString], cwd: &Path) -> ParseOutcome<Parse
     externs.sort();
     ParseOutcome::Ok(ParsedArguments {
         arguments: args,
+        input: PathBuf::from(input),
         output_dir,
         crate_types,
         externs,
@@ -1251,7 +1254,9 @@ pub fn parse_arguments(arguments: &[OsString], cwd: &Path) -> ParseOutcome<Parse
 }
 
 #[cfg(test)]
+#[path = "rustc_args_tests.rs"]
 mod tests;
 
 #[cfg(test)]
+#[path = "rustc_args_parser_tests.rs"]
 mod parser_tests;

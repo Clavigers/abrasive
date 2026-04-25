@@ -1,19 +1,33 @@
+use blake3::Hasher;
 use env_logger::Env;
-use log::{debug, error, info};
+use log::{error, info, warn};
 use std::env;
 use std::ffi::{OsStr, OsString};
-use std::io::Write;
+use std::fs;
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
 use std::process::{Command, exit};
 
+mod digest;
+mod disk_cache;
 mod rustc_args;
-use rustc_args::{ParseOutcome, parse_arguments};
+
+use digest::hash_rustc_args;
+use disk_cache::DiskCache;
+use rustc_args::{ParseOutcome, ParsedArguments, parse_arguments};
 
 fn main() {
     init_logger();
     let (rustc, rest) = parse_args();
-    log_command(&rustc, &rest);
-    try_parse_rustc(&rest);
-    run_rustc(&rustc, &rest);
+    let plan = plan_third_party_cache(&rest);
+    let exit_code = run_rustc(&rustc, &rest);
+    if exit_code == 0
+        && let Some((parsed, key)) = plan
+        && let Err(e) = save_outputs(&parsed, &key)
+    {
+        warn!("drop-point: cache store failed: {e}");
+    }
+    exit(exit_code);
 }
 
 fn init_logger() {
@@ -43,43 +57,80 @@ fn parse_args() -> (OsString, Vec<OsString>) {
     (rustc, rest)
 }
 
-fn log_command(rustc: &OsStr, rest: &[OsString]) {
-    let mut cmdline = rustc.to_string_lossy().into_owned();
-    for a in rest {
-        cmdline.push(' ');
-        cmdline.push_str(&a.to_string_lossy());
+fn plan_third_party_cache(rest: &[OsString]) -> Option<(ParsedArguments, String)> {
+    let cwd = env::current_dir().ok()?;
+    let parsed = match parse_arguments(rest, &cwd) {
+        ParseOutcome::Ok(p) => p,
+        _ => return None,
+    };
+    if !is_third_party(&parsed.input) {
+        return None;
     }
-    debug!("  {cmdline}");
+    let mut hasher = Hasher::new();
+    hash_rustc_args(&parsed, &mut hasher);
+    let key = hasher.finalize().to_hex().to_string();
+    info!("third-party {} -> {}", parsed.crate_name, &key[..16]);
+    Some((parsed, key))
 }
 
-fn try_parse_rustc(rest: &[OsString]) {
-    let cwd = match env::current_dir() {
-        Ok(c) => c,
-        Err(e) => {
-            error!("drop-point: cwd unavailable: {e}");
-            return;
-        }
+/// True when the input source is outside every workspace member dir.
+/// `DROP_POINT_WORKSPACE_MEMBERS` is colon-separated absolute paths set by
+/// the daemon from `cargo metadata`. Unset means we don't have authoritative
+/// info, so we fail closed and skip caching.
+fn is_third_party(input: &Path) -> bool {
+    let Some(env) = env::var_os("DROP_POINT_WORKSPACE_MEMBERS") else {
+        return false;
     };
-    match parse_arguments(rest, &cwd) {
-        ParseOutcome::Ok(_) => info!("parse: Ok"),
-        ParseOutcome::CannotCache(why, None) => info!("parse: CannotCache({why})"),
-        ParseOutcome::CannotCache(why, Some(extra)) => {
-            info!("parse: CannotCache({why}, {extra})")
+    let env = env.to_string_lossy();
+    !env.split(':')
+        .filter(|d| !d.is_empty())
+        .any(|d| input.starts_with(d))
+}
+
+fn save_outputs(parsed: &ParsedArguments, key: &str) -> io::Result<()> {
+    let cache = DiskCache::new(cache_root())?;
+    cache.put(key, |dst| copy_outputs_into(parsed, dst))
+}
+
+fn copy_outputs_into(parsed: &ParsedArguments, dst: &Path) -> io::Result<()> {
+    let dep_info = parsed
+        .dep_info
+        .as_ref()
+        .ok_or_else(|| io::Error::other("no dep-info"))?;
+    let stem = dep_info
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| io::Error::other("dep-info missing usable stem"))?;
+    let out = &parsed.output_dir;
+    for src in [
+        out.join(format!("lib{stem}.rlib")),
+        out.join(format!("lib{stem}.rmeta")),
+        out.join(dep_info),
+    ] {
+        if src.exists() {
+            let name = src.file_name().expect("has file name");
+            fs::copy(&src, dst.join(name))?;
         }
-        ParseOutcome::NotCompilation => info!("parse: NotCompilation"),
+    }
+    Ok(())
+}
+
+fn cache_root() -> PathBuf {
+    let home = env::var_os("HOME").unwrap_or_else(|| OsString::from("/tmp"));
+    PathBuf::from(home).join(".cache").join("drop-point")
+}
+
+fn run_rustc(rustc: &OsStr, rest: &[OsString]) -> i32 {
+    match Command::new(rustc).args(rest).status() {
+        Ok(s) => s.code().unwrap_or(1),
+        Err(e) => spawn_failed(rustc, e),
     }
 }
 
-fn run_rustc(rustc: &OsStr, rest: &[OsString]) -> ! {
-    let status = match Command::new(rustc).args(rest).status() {
-        Ok(s) => s,
-        Err(e) => {
-            error!(
-                "drop-point: failed to spawn {}: {e}",
-                rustc.to_string_lossy()
-            );
-            exit(2);
-        }
-    };
-    exit(status.code().unwrap_or(1));
+fn spawn_failed(rustc: &OsStr, e: io::Error) -> i32 {
+    error!(
+        "drop-point: failed to spawn {}: {e}",
+        rustc.to_string_lossy()
+    );
+    2
 }

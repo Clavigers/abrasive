@@ -153,7 +153,7 @@ fn serve_tip(stream: &mut WsConn) -> Result<(), DaemonError> {
 }
 
 fn pick_a_tip() -> &'static str {
-    "It Runs?"
+    "Cache??"
 }
 
 fn reject_busy(
@@ -472,16 +472,50 @@ fn run_build(stream: &mut WsConn, peer: &str, workspace: &Path, req: BuildReques
     }
     let (cargo_args, run_it) = build_cargo_args(req.cargo_args, req.host_platform);
     let cd_target = build_dir(workspace, req.subdir.as_deref());
+    let ws_members = read_workspace_member_dirs(&cd_target);
     println!(
         "[{peer}] mold -run cargo +nightly {} (in {})",
         cargo_args.join(" "),
         cd_target.display()
     );
-    match spawn_cargo(&cargo_args, &cd_target) {
+    match spawn_cargo(&cargo_args, &cd_target, ws_members.as_deref()) {
         Ok(child) if run_it => forward_run_output(stream, child, peer),
         Ok(child) => forward_build_output(stream, child, peer),
         Err(e) => send_spawn_failure(stream, &e),
     }
+}
+
+fn read_workspace_member_dirs(cd: &Path) -> Option<Vec<PathBuf>> {
+    let out = Command::new("cargo")
+        .arg("+nightly")
+        .arg("metadata")
+        .arg("--no-deps")
+        .arg("--format-version")
+        .arg("1")
+        .arg("--offline")
+        .current_dir(cd)
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
+    let dirs = v
+        .get("workspace_members")?
+        .as_array()?
+        .iter()
+        .filter_map(|m| parse_path_member_id(m.as_str()?))
+        .collect();
+    Some(dirs)
+}
+
+/// Workspace member IDs look like `path+file:///abs/path/to/crate#0.1.0`.
+/// We pull out the absolute path, since workspace members are always paths.
+fn parse_path_member_id(id: &str) -> Option<PathBuf> {
+    let rest = id.strip_prefix("path+file://")?;
+    let path = rest.split('#').next()?;
+    Some(PathBuf::from(path))
 }
 
 fn build_cargo_args(args: Vec<String>, platform: PlatformTriple) -> (Vec<String>, bool) {
@@ -503,9 +537,13 @@ fn build_dir(workspace: &Path, subdir: Option<&str>) -> PathBuf {
     }
 }
 
-fn spawn_cargo(args: &[String], cd: &Path) -> std::io::Result<Child> {
-    Command::new("mold")
-        .arg("-run")
+fn spawn_cargo(
+    args: &[String],
+    cd: &Path,
+    workspace_members: Option<&[PathBuf]>,
+) -> std::io::Result<Child> {
+    let mut cmd = Command::new("mold");
+    cmd.arg("-run")
         .arg("cargo")
         .arg("+nightly")
         .args(args)
@@ -520,17 +558,28 @@ fn spawn_cargo(args: &[String], cd: &Path) -> std::io::Result<Child> {
         .env("CARGO_PROFILE_DEV_STRIP", "debuginfo")
         // Use the cranelift codegen backend for the dev profile.
         // Cranelift is much faster than LLVM at producing unoptimized
-        // code, at the cost of slower runtime — perfect for dev builds.
+        // code, at the cost of slower runtime, perfect for dev builds.
         // Requires nightly toolchain + rustc-codegen-cranelift-preview
         // component installed on the remote.
         .env("CARGO_UNSTABLE_CODEGEN_BACKEND", "true")
         .env("CARGO_PROFILE_DEV_CODEGEN_BACKEND", "cranelift")
         // Keep cargo's ANSI color output even though stdout/stderr
-        // are piped here — the client re-renders into its own TTY.
+        // are piped here, the client re-renders into its own TTY.
         .env("CARGO_TERM_COLOR", "always")
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
+        .stderr(Stdio::piped());
+    // drop-point reads this to decide whether the input source path is
+    // first-party (skip cache) or third-party (cache by argv). Colon-separated
+    // because that's how PATH-style env vars work on linux.
+    if let Some(dirs) = workspace_members {
+        let joined = dirs
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join(":");
+        cmd.env("DROP_POINT_WORKSPACE_MEMBERS", joined);
+    }
+    cmd.spawn()
 }
 
 fn send_spawn_failure(stream: &mut WsConn, e: &std::io::Error) {
