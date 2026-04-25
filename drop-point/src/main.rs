@@ -5,6 +5,8 @@ use std::ffi::{OsStr, OsString};
 use std::io::Write;
 use std::process::{Command, exit};
 
+mod rustc_args;
+
 fn main() {
     init_logger();
     let (rustc, rest) = parse_args();
