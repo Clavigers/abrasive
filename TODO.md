@@ -51,6 +51,10 @@
 [METRICS] In-progress builds endpoint from orchestrator (for a dashboard view)
 [METRICS] Surface usage to the dashboard; reuse the existing Supabase schema patterns
 
+## V1 (post-launch)
+
+[SYNC] Promote source sync from a flat `Vec<FileEntry { path, hash }>` manifest to a proper Merkle tree: each directory becomes a content-addressed blob (sorted `(name, kind, child_hash)` list), workspace identity = root directory blob hash. Bonanza-style. Wins: cross-workspace dedup at directory granularity (two users with identical `target/` subtrees → one blob set globally), constant-size top-level state, snapshot identity for replay/debug. Keep the existing stat-fingerprint + speculative-send as the fast path; Merkle structure is the precise/dedup path. Skip the Bonanza protobuf/reference machinery — bincode-encoded directory blobs over blake3 is enough.
+
 ## Backlog
 
 [DESIGN] Convert the half slop image on the web page into a fully non slop vector thing
@@ -74,7 +78,6 @@
 
 [IDEA] run the local cargo and the remote, make them race first to be done wins
 [IDEA] make the init / setup command ask you questions in the foreground while the repo is being synced in the background
-[IDEA] get the sync stuff to be faster (maybe by creating something more like a merkle tree / or just a 32 bit everything hash that can be calculated quickly and potentially stored somewhere)
 
 [SYNC] Opt-in `ignore_globs` field in `abrasive.toml` to exclude source files that aren't part of the build (docs, fixtures, tooling) from the sync entirely
 

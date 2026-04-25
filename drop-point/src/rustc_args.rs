@@ -5,13 +5,10 @@
 use std::cmp::Ordering;
 use std::ffi::OsString;
 use std::marker::PhantomData;
-use std::path::{Path, PathBuf};
 use std::str;
 use thiserror::Error;
 
 pub type ArgParseResult<T> = Result<T, ArgParseError>;
-pub type ArgToStringResult = Result<String, ArgToStringError>;
-pub type PathTransformerFn<'a> = &'a mut dyn FnMut(&Path) -> Option<String>;
 
 #[derive(Debug, PartialEq, Eq, Error)]
 pub enum ArgParseError {
@@ -144,40 +141,101 @@ impl<T: ArgumentValue> Iterator for Iter<'_, T> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let result = match *self.arg {
-            Argument::Raw(ref s) | Argument::UnknownFlag(ref s) => match self.emitted {
-                0 => Some(s.clone()),
-                _ => None,
-            },
-            Argument::Flag(s, _) => match self.emitted {
-                0 => Some(s.into()),
-                _ => None,
-            },
-            Argument::WithValue(s, ref v, ref d) => match (self.emitted, d) {
-                (0, &ArgDisposition::CanBeSeparated(d)) | (0, &ArgDisposition::Concatenated(d)) => {
-                    let mut s = OsString::from(s);
-                    let v = v.clone().into_arg_os_string();
-                    if let Some(d) = d {
-                        if !v.is_empty() {
-                            s.push(OsString::from(
-                                str::from_utf8(&[d]).expect("delimiter should be ascii"),
-                            ));
-                        }
-                    }
-                    s.push(v);
-                    Some(s)
-                }
-                (0, &ArgDisposition::Separated) | (0, &ArgDisposition::CanBeConcatenated(_)) => {
-                    Some(s.into())
-                }
-                (1, &ArgDisposition::Separated) | (1, &ArgDisposition::CanBeConcatenated(_)) => {
-                    Some(v.clone().into_arg_os_string())
-                }
-                _ => None,
-            },
+            Argument::Raw(ref s) | Argument::UnknownFlag(ref s) => emit_raw(s, self.emitted),
+            Argument::Flag(s, _) => emit_flag(s, self.emitted),
+            Argument::WithValue(s, ref v, ref d) => emit_with_value(s, v, d, self.emitted),
         };
         if result.is_some() {
             self.emitted += 1;
         }
         result
     }
+}
+
+fn emit_raw(s: &OsString, emitted: usize) -> Option<OsString> {
+    match emitted {
+        0 => Some(s.clone()),
+        _ => None,
+    }
+}
+
+fn emit_flag(s: &'static str, emitted: usize) -> Option<OsString> {
+    match emitted {
+        0 => Some(s.into()),
+        _ => None,
+    }
+}
+
+fn emit_with_value<T: ArgumentValue>(
+    flag: &'static str,
+    value: &T,
+    disposition: &ArgDisposition,
+    emitted: usize,
+) -> Option<OsString> {
+    match (emitted, disposition) {
+        (0, &ArgDisposition::CanBeSeparated(d)) | (0, &ArgDisposition::Concatenated(d)) => {
+            Some(emit_concatenated(flag, value, d))
+        }
+        (0, &ArgDisposition::Separated) | (0, &ArgDisposition::CanBeConcatenated(_)) => {
+            Some(flag.into())
+        }
+        (1, &ArgDisposition::Separated) | (1, &ArgDisposition::CanBeConcatenated(_)) => {
+            Some(value.clone().into_arg_os_string())
+        }
+        _ => None,
+    }
+}
+
+fn emit_concatenated<T: ArgumentValue>(flag: &str, value: &T, delim: Delimiter) -> OsString {
+    let mut s = OsString::from(flag);
+    let v = value.clone().into_arg_os_string();
+    if let Some(d) = delim
+        && !v.is_empty()
+    {
+        s.push(str::from_utf8(&[d]).expect("delimiter must be ASCII; see ARGS table"));
+    }
+    s.push(v);
+    s
+}
+
+macro_rules! ArgData {
+    // Collected all the arms, time to create the match
+    { __matchify $var:ident $fn:ident ($( $fnarg:ident )*) ($( $arms:tt )*) } => {
+        match $var {
+            $( $arms )*
+        }
+    };
+    // Unit variant
+    { __matchify $var:ident $fn:ident ($( $fnarg:ident )*) ($( $arms:tt )*) $x:ident, $( $rest:tt )* } => {
+        ArgData!{
+            __matchify $var $fn ($($fnarg)*)
+            ($($arms)* ArgData::$x => ().$fn($( $fnarg )*),)
+            $($rest)*
+        }
+    };
+    // Tuple variant
+    { __matchify $var:ident $fn:ident ($( $fnarg:ident )*) ($( $arms:tt )*) $x:ident($y:ty), $( $rest:tt )* } => {
+        ArgData!{
+            __matchify $var $fn ($($fnarg)*)
+            ($($arms)* ArgData::$x(inner) => inner.$fn($( $fnarg )*),)
+            $($rest)*
+        }
+    };
+
+    { __impl $( $tok:tt )+ } => {
+        impl IntoArg for ArgData {
+            fn into_arg_os_string(self) -> OsString {
+                ArgData!{ __matchify self into_arg_os_string () () $($tok)+ }
+            }
+        }
+    };
+
+    // PartialEq necessary for tests
+    { pub $( $tok:tt )+ } => {
+        #[derive(Clone, Debug, PartialEq, Eq)]
+        pub enum ArgData {
+            $($tok)+
+        }
+        ArgData!{ __impl $( $tok )+ }
+    };
 }
