@@ -243,6 +243,14 @@ macro_rules! ArgData {
         }
         ArgData!{ __impl $( $tok )+ }
     };
+    { $( $tok:tt )+ } => {
+        #[derive(Clone, Debug, PartialEq)]
+        #[allow(clippy::enum_variant_names)]
+        enum ArgData {
+            $($tok)+
+        }
+        ArgData!{ __impl $( $tok )+ }
+    };
 }
 
 /// The value associated with a parsed argument.
@@ -294,3 +302,326 @@ impl IntoArg for () {
         OsString::new()
     }
 }
+
+pub fn split_os_string_arg(val: OsString, split: &str) -> ArgParseResult<(String, Option<String>)> {
+    let val = val.into_string().map_err(ArgParseError::InvalidUnicode)?;
+    let mut split_it = val.splitn(2, split);
+    let s1 = split_it.next().expect("splitn with no values");
+    let maybe_s2 = split_it.next();
+    Ok((s1.to_owned(), maybe_s2.map(|s| s.to_owned())))
+}
+
+/// The description of how an argument may be parsed
+#[derive(PartialEq, Eq, Clone, Debug)]
+#[allow(unpredictable_function_pointer_comparisons)]
+pub enum ArgInfo<T> {
+    /// An simple flag argument, of the form "-foo"
+    Flag(&'static str, T),
+    /// An argument with a value; e.g. "-qux bar", where the way the
+    /// value is passed is described by the ArgDisposition type.
+    TakeArg(
+        &'static str,
+        fn(OsString) -> ArgParseResult<T>,
+        ArgDisposition,
+    ),
+}
+
+impl<T: ArgumentValue> ArgInfo<T> {
+    /// Transform an argument description into a parsed Argument, given a
+    /// string. For arguments with a value, where the value is separate, the
+    /// `get_next_arg` function returns the next argument, in raw `OsString`
+    /// form.
+    fn process(
+        self,
+        arg: &str,
+        get_next_arg: impl FnOnce() -> Option<OsString>,
+    ) -> ArgParseResult<Argument<T>> {
+        match self {
+            ArgInfo::Flag(s, variant) => process_flag(s, arg, variant),
+            ArgInfo::TakeArg(s, create, disposition) => {
+                process_take_arg(s, arg, create, disposition, get_next_arg)
+            }
+        }
+    }
+
+    /// Returns whether the given string matches the argument description, and
+    /// if not, how it differs.
+    fn cmp(&self, arg: &str) -> Ordering {
+        let s = self.flag_str();
+        match self {
+            ArgInfo::TakeArg(
+                _,
+                _,
+                ArgDisposition::CanBeSeparated(d)
+                | ArgDisposition::Concatenated(d)
+                | ArgDisposition::CanBeConcatenated(d),
+            ) if arg.starts_with(s) => match d {
+                None => Ordering::Equal,
+                Some(d) if arg.len() > s.len() => arg.as_bytes()[s.len()].cmp(d),
+                _ => s.cmp(&arg),
+            },
+            _ => s.cmp(&arg),
+        }
+    }
+
+    fn flag_str(&self) -> &'static str {
+        match self {
+            &ArgInfo::Flag(s, _) | &ArgInfo::TakeArg(s, _, _) => s,
+        }
+    }
+}
+
+fn process_take_arg<T: ArgumentValue>(
+    s: &'static str,
+    arg: &str,
+    create: fn(OsString) -> ArgParseResult<T>,
+    disposition: ArgDisposition,
+    get_next_arg: impl FnOnce() -> Option<OsString>,
+) -> ArgParseResult<Argument<T>> {
+    match disposition {
+        ArgDisposition::Separated => process_separated(s, arg, create, get_next_arg),
+        ArgDisposition::Concatenated(d) => process_concatenated(s, arg, create, d),
+        ArgDisposition::CanBeSeparated(d) | ArgDisposition::CanBeConcatenated(d) => {
+            process_either(s, arg, create, d, get_next_arg)
+        }
+    }
+}
+
+fn process_flag<T>(s: &'static str, arg: &str, variant: T) -> ArgParseResult<Argument<T>> {
+    debug_assert_eq!(s, arg);
+    Ok(Argument::Flag(s, variant))
+}
+
+fn process_separated<T>(
+    s: &'static str,
+    arg: &str,
+    create: fn(OsString) -> ArgParseResult<T>,
+    get_next_arg: impl FnOnce() -> Option<OsString>,
+) -> ArgParseResult<Argument<T>> {
+    debug_assert_eq!(s, arg);
+    let next = get_next_arg().ok_or(ArgParseError::UnexpectedEndOfArgs)?;
+    Ok(Argument::WithValue(
+        s,
+        create(next)?,
+        ArgDisposition::Separated,
+    ))
+}
+
+fn process_concatenated<T>(
+    s: &'static str,
+    arg: &str,
+    create: fn(OsString) -> ArgParseResult<T>,
+    d: Delimiter,
+) -> ArgParseResult<Argument<T>> {
+    let mut len = s.len();
+    debug_assert_eq!(&arg[..len], s);
+    if let Some(d) = d
+        && arg.as_bytes().get(len) == Some(&d)
+    {
+        len += 1;
+    }
+    Ok(Argument::WithValue(
+        s,
+        create(arg[len..].into())?,
+        ArgDisposition::Concatenated(d),
+    ))
+}
+
+fn process_either<T: ArgumentValue>(
+    s: &'static str,
+    arg: &str,
+    create: fn(OsString) -> ArgParseResult<T>,
+    d: Delimiter,
+    get_next_arg: impl FnOnce() -> Option<OsString>,
+) -> ArgParseResult<Argument<T>> {
+    let derived = if arg == s {
+        ArgInfo::TakeArg(s, create, ArgDisposition::Separated)
+    } else {
+        ArgInfo::TakeArg(s, create, ArgDisposition::Concatenated(d))
+    };
+    match derived.process(arg, get_next_arg) {
+        Err(ArgParseError::UnexpectedEndOfArgs) if d.is_none() => Ok(Argument::WithValue(
+            s,
+            create("".into())?,
+            ArgDisposition::Concatenated(d),
+        )),
+        Ok(Argument::WithValue(s, v, ArgDisposition::Concatenated(d))) => {
+            Ok(Argument::WithValue(s, v, ArgDisposition::CanBeSeparated(d)))
+        }
+        Ok(Argument::WithValue(s, v, ArgDisposition::Separated)) => Ok(Argument::WithValue(
+            s,
+            v,
+            ArgDisposition::CanBeConcatenated(d),
+        )),
+        a => a,
+    }
+}
+
+// todo revisit the design above. I think some of these should be impls on something
+
+/// Binary search for a `key` in a sorted array of items, given a comparison
+/// function. Tweaked to handle prefix matching, where multiple items in the
+/// array might match but the last match is the one actually matching.
+fn bsearch<K, T, F>(key: K, items: &[T], cmp: F) -> Option<&T>
+where
+    F: Fn(&T, &K) -> Ordering,
+{
+    let mut slice = items;
+    while !slice.is_empty() {
+        let middle = slice.len() / 2;
+        match cmp(&slice[middle], &key) {
+            Ordering::Equal => {
+                return bsearch(key, &slice[middle + 1..], cmp).or(Some(&slice[middle]));
+            }
+            Ordering::Greater => slice = &slice[..middle],
+            Ordering::Less => slice = &slice[middle + 1..],
+        }
+    }
+    None
+}
+
+/// Trait for generically searching over a "set" of `ArgInfo`s.
+pub trait SearchableArgInfo<T> {
+    fn search(&self, key: &str) -> Option<&ArgInfo<T>>;
+
+    #[cfg(debug_assertions)]
+    fn check(&self) -> bool;
+}
+
+/// Search over a sorted array of `ArgInfo` items.
+impl<T: ArgumentValue> SearchableArgInfo<T> for &'static [ArgInfo<T>] {
+    fn search(&self, key: &str) -> Option<&ArgInfo<T>> {
+        bsearch(key, self, |i, k| i.cmp(k))
+    }
+
+    #[cfg(debug_assertions)]
+    fn check(&self) -> bool {
+        self.windows(2).all(|w| {
+            let a = w[0].flag_str();
+            let b = w[1].flag_str();
+            assert!(a < b, "{} can't precede {}", a, b);
+            true
+        })
+    }
+}
+
+/// An `Iterator` for parsed arguments.
+pub struct ArgsIter<I, T, S>
+where
+    I: Iterator<Item = OsString>,
+    S: SearchableArgInfo<T>,
+{
+    arguments: I,
+    arg_info: S,
+    seen_double_dashes: Option<bool>,
+    phantom: PhantomData<T>,
+}
+
+impl<I, T, S> ArgsIter<I, T, S>
+where
+    I: Iterator<Item = OsString>,
+    T: ArgumentValue,
+    S: SearchableArgInfo<T>,
+{
+    /// Create an `Iterator` for parsed arguments, given an iterator of raw
+    /// `OsString` arguments, and argument descriptions.
+    pub fn new(arguments: I, arg_info: S) -> Self {
+        #[cfg(debug_assertions)]
+        debug_assert!(arg_info.check());
+        ArgsIter {
+            arguments,
+            arg_info,
+            seen_double_dashes: None,
+            phantom: PhantomData,
+        }
+    }
+
+    pub fn with_double_dashes(mut self) -> Self {
+        self.seen_double_dashes = Some(false);
+        self
+    }
+
+    fn in_post_double_dash_mode(&mut self, arg: &OsString) -> bool {
+        let Some(seen) = self.seen_double_dashes.as_mut() else {
+            return false;
+        };
+        if !*seen && arg == "--" {
+            *seen = true;
+        }
+        *seen
+    }
+
+    fn classify_arg(&mut self, arg: OsString) -> ArgParseResult<Argument<T>> {
+        let s = arg.to_string_lossy();
+        let arguments = &mut self.arguments;
+        match self.arg_info.search(&s) {
+            Some(i) => i.clone().process(&s, || arguments.next()),
+            None if s.starts_with('-') => Ok(Argument::UnknownFlag(arg.clone())),
+            None => Ok(Argument::Raw(arg.clone())),
+        }
+    }
+}
+
+impl<I, T, S> Iterator for ArgsIter<I, T, S>
+where
+    I: Iterator<Item = OsString>,
+    T: ArgumentValue,
+    S: SearchableArgInfo<T>,
+{
+    type Item = ArgParseResult<Argument<T>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let arg = self.arguments.next()?;
+        if self.in_post_double_dash_mode(&arg) {
+            return Some(Ok(Argument::Raw(arg)));
+        }
+        Some(self.classify_arg(arg))
+    }
+}
+
+/// Helper macro used to define `ArgInfo::Flag`s.
+/// Variant is an enum variant, e.g. `enum ArgType { Variant }`.
+///
+/// ```ignore
+/// flag!("-foo", Variant)
+/// ```
+macro_rules! flag {
+    ($s:expr, $variant:expr) => {
+        ArgInfo::Flag($s, $variant)
+    };
+}
+
+/// Helper macro used to define `ArgInfo::TakeArg`s.
+/// Variant is an enum variant, e.g. `enum ArgType { Variant(OsString) }`.
+///
+/// ```ignore
+/// take_arg!("-foo", OsString, Separated, Variant)
+/// take_arg!("-foo", OsString, Concatenated, Variant)
+/// take_arg!("-foo", OsString, Concatenated(b'='), Variant)
+/// ```
+macro_rules! take_arg {
+    ($s:expr, $vtype:ident, Separated, $variant:expr) => {
+        ArgInfo::TakeArg(
+            $s,
+            |arg: OsString| $vtype::process(arg).map($variant),
+            ArgDisposition::Separated,
+        )
+    };
+    ($s:expr, $vtype:ident, $d:ident, $variant:expr) => {
+        ArgInfo::TakeArg(
+            $s,
+            |arg: OsString| $vtype::process(arg).map($variant),
+            ArgDisposition::$d(None),
+        )
+    };
+    ($s:expr, $vtype:ident, $d:ident($x:expr), $variant:expr) => {
+        ArgInfo::TakeArg(
+            $s,
+            |arg: OsString| $vtype::process(arg).map($variant),
+            ArgDisposition::$d(Some($x)),
+        )
+    };
+}
+
+#[cfg(test)]
+mod tests;
