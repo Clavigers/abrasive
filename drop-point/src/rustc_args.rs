@@ -198,6 +198,9 @@ fn emit_concatenated<T: ArgumentValue>(flag: &str, value: &T, delim: Delimiter) 
     s
 }
 
+/// Generates the `ArgData` enum and an `IntoArg` impl that delegates each
+/// variant to its inner value, so adding a new variant is one line in the
+/// macro call instead of one new match arm per IntoArg method.
 macro_rules! ArgData {
     // Collected all the arms, time to create the match
     { __matchify $var:ident $fn:ident ($( $fnarg:ident )*) ($( $arms:tt )*) } => {
