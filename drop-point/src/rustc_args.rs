@@ -1107,8 +1107,12 @@ pub fn parse_arguments(arguments: &[OsString], cwd: &Path) -> ParseOutcome<Parse
                 ("extra-filename", Some(value)) => extra_filename = Some(value.to_owned()),
                 ("extra-filename", None) => cannot_cache!("extra-filename"),
                 ("profile-use", Some(v)) => profile = Some(v.clone()),
-                // drop-point caches incremental builds; see INCREMENTAL.md
-                ("incremental", _) => (),
+                // Incremental compilation produces extra outputs we don't
+                // track and the session-state files it writes are not
+                // deterministic across runs. Letting rustc do its incremental
+                // thing locally is also likely faster than a remote hit.
+                // Punt for now; same call sccache makes.
+                ("incremental", _) => cannot_cache!("incremental"),
                 (_, _) => (),
             },
             Some(Unstable(_)) => (),
