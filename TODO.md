@@ -12,9 +12,10 @@
 [DROP-POINT] Use `--remap-path-prefix` for workspace, `$CARGO_HOME`, and the rustc sysroot so embedded paths are machine-independent
 [DROP-POINT] On cache miss, non-incremental: run rustc, upload outputs to blob store, write action-cache entry
 [DROP-POINT] On cache miss, incremental: run rustc, do NOT cache (output is nondeterministic)
-[DROP-POINT] Cache build-script outputs separately, keyed on (build script source hash, declared env vars, target triple, fleet-snapshot marker)
+[DROP-POINT] Cache build-script outputs separately, keyed on (build script source hash, declared env vars, fleet-snapshot marker) — target triple is implicit in the image, no need to key on it separately
 [DROP-POINT] Denylist crates known to be non-deterministic (anything embedding git rev, build time, hostname) — wrapper skips caching them
 [DROP-POINT] Pipelined rmeta serving: on hit, return `.rmeta` immediately even if `.rlib` is still materializing, matching cargo's own pipelining so downstream type-check doesn't wait on upstream codegen
+[DROP-POINT] Source-input hash strategy splits by first-party vs third-party. Third-party: walk up from the input file to find the enclosing `Cargo.toml` and hash the crate directory tree directly (fast, no rustc invocation, safe because registry-packaged crates have a tight directory boundary). First-party / workspace crates: do what sccache does — run `rustc --emit=dep-info` to get the precise source set, since workspace crates can `include_str!`/`include_bytes!` arbitrary repo paths outside their own dir
 
 [SYNC] Source sync writes each received file as a blob in the shared blob store (see [BLOBS]); workspace materialization is a hardlink tree over the blob store
 [SYNC] Blobs chmod 444 in the blob store so build scripts can't silently mutate shared state — EACCES surfaces the problem immediately
