@@ -153,7 +153,7 @@ fn serve_tip(stream: &mut WsConn) -> Result<(), DaemonError> {
 }
 
 fn pick_a_tip() -> &'static str {
-    "It Runs?"
+    "Cache??"
 }
 
 fn reject_busy(
