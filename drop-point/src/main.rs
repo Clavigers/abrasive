@@ -8,12 +8,14 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, exit};
 
+mod cache_io;
 mod digest;
 mod disk_cache;
 mod rustc_args;
 
+use cache_io::{CacheWrite, FileObjectSource};
 use digest::hash_rustc_args;
-use disk_cache::DiskCache;
+use disk_cache::{DiskCache, entry_path};
 use rustc_args::{ParseOutcome, ParsedArguments, parse_arguments};
 
 fn main() {
@@ -21,7 +23,7 @@ fn main() {
     let (rustc, rest) = parse_args();
     let plan = plan_third_party_cache(&rest);
     if let Some((parsed, key)) = &plan
-        && try_serve_from_cache(parsed, key)
+        && try_serve_from_cache(&rustc, &rest, parsed, key)
     {
         exit(0);
     }
@@ -95,44 +97,46 @@ fn is_third_party(input: &Path) -> bool {
         .any(|d| input.starts_with(d))
 }
 
-fn try_serve_from_cache(parsed: &ParsedArguments, key: &str) -> bool {
+fn try_serve_from_cache(
+    rustc: &OsStr,
+    rest: &[OsString],
+    parsed: &ParsedArguments,
+    key: &str,
+) -> bool {
     let root = cache_root();
     let Ok(cache) = DiskCache::new(root.clone()) else {
-        info!("get-miss: DiskCache::new failed at {}", root.display());
+        debug!("get-miss: DiskCache::new failed at {}", root.display());
         return false;
     };
-    let Some(src) = cache.get(key) else {
-        let final_path = root.join(&key[0..1]).join(&key[1..2]).join(key);
-        let meta = fs::symlink_metadata(&final_path);
-        info!(
-            "get-miss: {} key={} root={} final_path={:?} metadata={:?}",
-            parsed.crate_name,
-            key,
-            root.display(),
-            final_path,
-            meta,
-        );
-        return false;
+    let entry = match cache.get(key) {
+        Ok(Some(e)) => e,
+        Ok(None) => {
+            let path = entry_path(&root, key);
+            let meta = fs::symlink_metadata(&path);
+            debug!(
+                "get-miss: {} key={} entry_path={:?} metadata={:?}",
+                parsed.crate_name, key, path, meta,
+            );
+            return false;
+        }
+        Err(e) => {
+            warn!("drop-point: cache read error for {}: {e}", parsed.crate_name);
+            return false;
+        }
     };
-    if let Err(e) = hardlink_into(&src, &parsed.output_dir) {
+    let objects = match plan_outputs(rustc, rest, parsed) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!("drop-point: cache hit but couldn't plan outputs: {e}");
+            return false;
+        }
+    };
+    if let Err(e) = entry.extract_objects(objects) {
         warn!("drop-point: cache hit but materialize failed: {e}");
         return false;
     }
     info!("hit {} {}", parsed.crate_name, &key[..16]);
     true
-}
-
-fn hardlink_into(src_dir: &Path, out_dir: &Path) -> io::Result<()> {
-    fs::create_dir_all(out_dir)?;
-    for entry in fs::read_dir(src_dir)? {
-        let entry = entry?;
-        let dest = out_dir.join(entry.file_name());
-        let _ = fs::remove_file(&dest);
-        if fs::hard_link(entry.path(), &dest).is_err() {
-            fs::copy(entry.path(), &dest)?;
-        }
-    }
-    Ok(())
 }
 
 fn save_outputs(
@@ -142,18 +146,19 @@ fn save_outputs(
     key: &str,
 ) -> io::Result<()> {
     let root = cache_root();
-    let final_path = root.join(&key[0..1]).join(&key[1..2]).join(key);
-    let pre_exists = final_path.is_dir();
     let cache = DiskCache::new(root.clone())?;
-    let wrote = cache.put(key, |dst| copy_outputs_into(rustc, rest, parsed, dst))?;
+    let objects = plan_outputs(rustc, rest, parsed)?;
+    let entry = CacheWrite::from_objects(objects)
+        .map_err(|e| io::Error::other(format!("build cache entry: {e}")))?;
+    let wrote = cache
+        .put(key, entry)
+        .map_err(|e| io::Error::other(format!("put: {e}")))?;
     debug!(
-        "put: {} key={} root={} pre_exists={} wrote={} final_exists_now={}",
+        "put: {} key={} root={} wrote={}",
         parsed.crate_name,
         key,
         root.display(),
-        pre_exists,
         wrote,
-        final_path.is_dir(),
     );
     if wrote {
         info!("cached {} {}", parsed.crate_name, &key[..16]);
@@ -161,12 +166,14 @@ fn save_outputs(
     Ok(())
 }
 
-fn copy_outputs_into(
+/// Compute the [`FileObjectSource`] list — one entry per output file rustc
+/// produces — for both the put (read these files into the zip) and get
+/// (extract zip members into these paths) sides.
+fn plan_outputs(
     rustc: &OsStr,
     rest: &[OsString],
     parsed: &ParsedArguments,
-    dst: &Path,
-) -> io::Result<()> {
+) -> io::Result<Vec<FileObjectSource>> {
     let mut names = refine_outputs(parsed, discover_outputs(rustc, rest)?);
     if let Some(d) = &parsed.dep_info {
         names.push(d.to_string_lossy().into_owned());
@@ -175,13 +182,14 @@ fn copy_outputs_into(
         names.push(p.to_string_lossy().into_owned());
     }
     let out = &parsed.output_dir;
-    for name in &names {
-        let src = out.join(name);
-        if src.exists() {
-            fs::copy(&src, dst.join(name))?;
-        }
-    }
-    Ok(())
+    Ok(names
+        .into_iter()
+        .map(|name| FileObjectSource {
+            path: out.join(&name),
+            key: name,
+            optional: false,
+        })
+        .collect())
 }
 
 /// Ask rustc which files this invocation would produce. `--print file-names`
