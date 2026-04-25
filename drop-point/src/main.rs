@@ -69,7 +69,6 @@ fn plan_third_party_cache(rest: &[OsString]) -> Option<(ParsedArguments, String)
     let mut hasher = Hasher::new();
     hash_rustc_args(&parsed, &mut hasher);
     let key = hasher.finalize().to_hex().to_string();
-    info!("third-party {} -> {}", parsed.crate_name, &key[..16]);
     Some((parsed, key))
 }
 
@@ -89,7 +88,10 @@ fn is_third_party(input: &Path) -> bool {
 
 fn save_outputs(parsed: &ParsedArguments, key: &str) -> io::Result<()> {
     let cache = DiskCache::new(cache_root())?;
-    cache.put(key, |dst| copy_outputs_into(parsed, dst))
+    if cache.put(key, |dst| copy_outputs_into(parsed, dst))? {
+        info!("cached {} {}", parsed.crate_name, &key[..16]);
+    }
+    Ok(())
 }
 
 fn copy_outputs_into(parsed: &ParsedArguments, dst: &Path) -> io::Result<()> {

@@ -22,14 +22,16 @@ impl DiskCache {
     }
 
     /// `fill` writes outputs into a fresh tempdir; on success the tempdir
-    /// is renamed into place. No-op if another process won the race.
-    pub fn put<F>(&self, key: &str, fill: F) -> io::Result<()>
+    /// is renamed into place. Returns true when this call wrote the entry,
+    /// false when the entry already existed (either before we started or
+    /// because another process won the race).
+    pub fn put<F>(&self, key: &str, fill: F) -> io::Result<bool>
     where
         F: FnOnce(&Path) -> io::Result<()>,
     {
         let final_path = self.path_for(key);
         if final_path.is_dir() {
-            return Ok(());
+            return Ok(false);
         }
         let parent = final_path.parent().expect("path_for produces a parent");
         fs::create_dir_all(parent)?;
@@ -47,15 +49,14 @@ impl DiskCache {
     }
 }
 
-fn finalize(tmp: &Path, final_path: &Path) -> io::Result<()> {
-    let result = fs::rename(tmp, final_path);
-    if result.is_err() {
-        let _ = fs::remove_dir_all(tmp);
-        if final_path.is_dir() {
-            return Ok(());
+fn finalize(tmp: &Path, final_path: &Path) -> io::Result<bool> {
+    match fs::rename(tmp, final_path) {
+        Ok(()) => Ok(true),
+        Err(e) => {
+            let _ = fs::remove_dir_all(tmp);
+            if final_path.is_dir() { Ok(false) } else { Err(e) }
         }
     }
-    result
 }
 
 fn tempdir_in(parent: &Path) -> io::Result<PathBuf> {
