@@ -1,9 +1,13 @@
-// TODO replace this with a lru disk cache almost identical to the one found in sccache.
+// Mirrors sccache/src/cache/disk.rs. Each cache entry is a single file at
+// `<root>/<key[0]>/<key[1]>/<key>` containing a zip archive of the cached
+// outputs (see cache_io.rs). Lookup is `File::open`, write is
+// "tempfile + atomic rename" so concurrent puts can't corrupt a reader.
 
 use std::fs;
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+
+use crate::cache_io::{CacheIoError, CacheRead, CacheWrite};
 
 pub struct DiskCache {
     root: PathBuf,
@@ -15,32 +19,39 @@ impl DiskCache {
         Ok(DiskCache { root })
     }
 
-    /// On hit: directory holding this entry's outputs. Caller copies/links out.
-    pub fn get(&self, key: &str) -> Option<PathBuf> {
+    /// On hit: returns a [`CacheRead`] that the caller can extract objects
+    /// from. On miss: returns Ok(None).
+    pub fn get(&self, key: &str) -> Result<Option<CacheRead>, CacheIoError> {
         let path = self.path_for(key);
-        path.is_dir().then_some(path)
+        match fs::File::open(&path) {
+            Ok(f) => Ok(Some(CacheRead::from(f)?)),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e.into()),
+        }
     }
 
-    /// `fill` writes outputs into a fresh tempdir; on success the tempdir
-    /// is renamed into place. Returns true when this call wrote the entry,
-    /// false when the entry already existed (either before we started or
-    /// because another process won the race).
-    pub fn put<F>(&self, key: &str, fill: F) -> io::Result<bool>
-    where
-        F: FnOnce(&Path) -> io::Result<()>,
-    {
+    /// Write a finished [`CacheWrite`] entry to disk. Atomic via
+    /// temp-file-then-rename. Returns true if this call wrote the entry,
+    /// false if it already existed (whether before we started or because
+    /// another process won the race).
+    pub fn put(&self, key: &str, entry: CacheWrite) -> Result<bool, CacheIoError> {
         let final_path = self.path_for(key);
-        if final_path.is_dir() {
+        if final_path.is_file() {
             return Ok(false);
         }
         let parent = final_path.parent().expect("path_for produces a parent");
         fs::create_dir_all(parent)?;
-        let tmp = tempdir_in(parent)?;
-        if let Err(e) = fill(&tmp) {
-            let _ = fs::remove_dir_all(&tmp);
-            return Err(e);
+        let bytes = entry.finish()?;
+        let mut tmp = tempfile::NamedTempFile::new_in(parent)?;
+        tmp.write_all(&bytes)?;
+        match tmp.persist_noclobber(&final_path) {
+            Ok(_) => Ok(true),
+            Err(e) if final_path.is_file() => {
+                let _ = fs::remove_file(e.file.path());
+                Ok(false)
+            }
+            Err(e) => Err(io::Error::other(format!("persist failed: {e}")).into()),
         }
-        finalize(&tmp, &final_path)
     }
 
     fn path_for(&self, key: &str) -> PathBuf {
@@ -49,26 +60,7 @@ impl DiskCache {
     }
 }
 
-fn finalize(tmp: &Path, final_path: &Path) -> io::Result<bool> {
-    match fs::rename(tmp, final_path) {
-        Ok(()) => Ok(true),
-        Err(e) => {
-            let _ = fs::remove_dir_all(tmp);
-            if final_path.is_dir() { Ok(false) } else { Err(e) }
-        }
-    }
-}
-
-fn tempdir_in(parent: &Path) -> io::Result<PathBuf> {
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let pid = std::process::id();
-    loop {
-        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let path = parent.join(format!(".tmp-{pid}-{n}"));
-        match fs::create_dir(&path) {
-            Ok(()) => return Ok(path),
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(e),
-        }
-    }
+/// True if a cache entry exists for this key, without opening it.
+pub fn entry_path(root: &Path, key: &str) -> PathBuf {
+    root.join(&key[0..1]).join(&key[1..2]).join(key)
 }
