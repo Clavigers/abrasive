@@ -14,6 +14,7 @@ specifically:
 - It can cache build.rs and proc macros (imperfectly but good enough for us)
 - Cargo-aware, not just rustc-aware. sccache wraps rustc and treats each invocation independently; drop-point has some per-cargo-invocation logic.
 - Pipelined caching. rustc emits .rmeta before codegen finishes so downstream crates can start type-checking early. drop-point stores .rmeta and .rlib as separate blobs and serves them independently. A hit on .rmeta returns immediately even if the .rlib isn't ready yet. sccache treats a compile as atomic so it can't do this.
+- It caches binaries. sccache only caches `--crate-type=rlib` and `staticlib`; bin, dylib, cdylib all fall through to running rustc uncached because sccache can't track linker inputs (libc, libgcc, system libs) across arbitrary host machines. drop-point treats the worker image as the linker environment, so those inputs are deterministic and bin/dylib/cdylib compiles can be cached. (maybe this belongs in the What would a remote cache look like if it was married to remote exec)
 
 
 ### What would a remote cache look like if it was married to remote exec?
