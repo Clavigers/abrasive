@@ -467,7 +467,8 @@ fn run_build(stream: &mut WsConn, peer: &str, workspace: &Path, req: BuildReques
         return;
     }
     if req.cargo_args.first().map_or(false, |c| c == "clean") {
-        handle_clean(stream, peer, workspace);
+        let expunge = req.cargo_args.iter().any(|a| a == "--expunge");
+        handle_clean(stream, peer, workspace, expunge);
         return;
     }
     let (cargo_args, run_it) = build_cargo_args(req.cargo_args, req.host_platform);
@@ -588,21 +589,33 @@ fn send_spawn_failure(stream: &mut WsConn, e: &std::io::Error) {
     let _ = send_msg(stream, &Message::BuildFinished { exit_code: 1 });
 }
 
-fn handle_clean(stream: &mut WsConn, peer: &str, workspace: &Path) {
-    match clean_target(workspace) {
-        Ok((files, bytes)) => {
-            let mib = bytes as f64 / (1024.0 * 1024.0);
-            let line = format!("     Removed {files} files, {mib:.1}MiB total\n");
-            let _ = send_msg(stream, &Message::BuildStderr(line.into_bytes()));
-            println!("[{peer}] clean: removed {files} files, {bytes} bytes");
-        }
-        Err(e) => {
-            let msg = format!("clean failed: {e}\n").into_bytes();
-            let _ = send_msg(stream, &Message::BuildStderr(msg));
-            println!("[{peer}] clean failed: {e}");
-        }
+fn handle_clean(stream: &mut WsConn, peer: &str, workspace: &Path, expunge: bool) {
+    report_clean(stream, peer, "clean", clean_target(workspace));
+    if expunge {
+        report_clean(stream, peer, "expunge", expunge_drop_point_cache());
     }
     let _ = send_msg(stream, &Message::BuildFinished { exit_code: 0 });
+}
+
+fn report_clean(
+    stream: &mut WsConn,
+    peer: &str,
+    label: &str,
+    res: std::io::Result<(usize, u64)>,
+) {
+    match res {
+        Ok((files, bytes)) => {
+            let mib = bytes as f64 / (1024.0 * 1024.0);
+            let line = format!("     {label}: removed {files} files, {mib:.1}MiB total\n");
+            let _ = send_msg(stream, &Message::BuildStderr(line.into_bytes()));
+            println!("[{peer}] {label}: removed {files} files, {bytes} bytes");
+        }
+        Err(e) => {
+            let msg = format!("{label} failed: {e}\n").into_bytes();
+            let _ = send_msg(stream, &Message::BuildStderr(msg));
+            println!("[{peer}] {label} failed: {e}");
+        }
+    }
 }
 
 fn clean_target(workspace: &Path) -> std::io::Result<(usize, u64)> {
@@ -612,6 +625,19 @@ fn clean_target(workspace: &Path) -> std::io::Result<(usize, u64)> {
     }
     let (files, bytes) = dir_size(&target);
     fs::remove_dir_all(&target)?;
+    Ok((files, bytes))
+}
+
+/// Wipe drop-point's local disk cache. Path mirrors drop-point's
+/// `cache_root()`: `<HOME>/.cache/drop-point`.
+fn expunge_drop_point_cache() -> std::io::Result<(usize, u64)> {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+    let cache = PathBuf::from(home).join(".cache").join("drop-point");
+    if !cache.exists() {
+        return Ok((0, 0));
+    }
+    let (files, bytes) = dir_size(&cache);
+    fs::remove_dir_all(&cache)?;
     Ok((files, bytes))
 }
 
