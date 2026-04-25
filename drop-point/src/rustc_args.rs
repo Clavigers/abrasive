@@ -240,7 +240,7 @@ macro_rules! ArgData {
 
     // PartialEq necessary for tests
     { pub $( $tok:tt )+ } => {
-        #[derive(Clone, Debug, PartialEq, Eq)]
+        #[derive(Clone, Debug, PartialEq)]
         pub enum ArgData {
             $($tok)+
         }
@@ -679,7 +679,7 @@ macro_rules! try_or_cannot_cache {
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParsedArguments {
     /// The full commandline, with all parsed arguments.
-    arguments: Vec<Argument<ArgData>>,
+    pub(crate) arguments: Vec<Argument<ArgData>>,
     /// The location of compiler outputs.
     output_dir: PathBuf,
     /// Paths to extern crates used in the compile.
@@ -706,7 +706,7 @@ pub struct ParsedArguments {
     /// Whether `--json` was passed to this invocation.
     has_json: bool,
     /// A `--target` parameter that specifies a path to a JSON file.
-    target_json: Option<PathBuf>,
+    pub(crate) target_json: Option<PathBuf>,
 }
 
 /// The selection of crate types for this compilation.
@@ -950,7 +950,7 @@ impl IntoArg for ArgTarget {
     }
 }
 
-ArgData! {
+ArgData! { pub
     TooHardFlag,
     TooHardPath(PathBuf),
     NotCompilationFlag,
@@ -1251,7 +1251,9 @@ pub fn parse_arguments(arguments: &[OsString], cwd: &Path) -> ParseOutcome<Parse
 }
 
 #[cfg(test)]
+#[path = "rustc_args_tests.rs"]
 mod tests;
 
 #[cfg(test)]
+#[path = "rustc_args_parser_tests.rs"]
 mod parser_tests;
