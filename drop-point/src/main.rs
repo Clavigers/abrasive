@@ -105,10 +105,11 @@ fn try_serve_from_cache(parsed: &ParsedArguments, key: &str) -> bool {
         let final_path = root.join(&key[0..1]).join(&key[1..2]).join(key);
         let meta = fs::symlink_metadata(&final_path);
         info!(
-            "get-miss: {} key={} root={} metadata={:?}",
+            "get-miss: {} key={} root={} final_path={:?} metadata={:?}",
             parsed.crate_name,
             key,
             root.display(),
+            final_path,
             meta,
         );
         return false;
