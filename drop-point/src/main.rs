@@ -20,6 +20,11 @@ fn main() {
     init_logger();
     let (rustc, rest) = parse_args();
     let plan = plan_third_party_cache(&rest);
+    if let Some((parsed, key)) = &plan
+        && try_serve_from_cache(parsed, key)
+    {
+        exit(0);
+    }
     let exit_code = run_rustc(&rustc, &rest);
     if exit_code == 0
         && let Some((parsed, key)) = plan
@@ -84,6 +89,34 @@ fn is_third_party(input: &Path) -> bool {
     !env.split(':')
         .filter(|d| !d.is_empty())
         .any(|d| input.starts_with(d))
+}
+
+fn try_serve_from_cache(parsed: &ParsedArguments, key: &str) -> bool {
+    let Ok(cache) = DiskCache::new(cache_root()) else {
+        return false;
+    };
+    let Some(src) = cache.get(key) else {
+        return false;
+    };
+    if let Err(e) = hardlink_into(&src, &parsed.output_dir) {
+        warn!("drop-point: cache hit but materialize failed: {e}");
+        return false;
+    }
+    info!("hit {} {}", parsed.crate_name, &key[..16]);
+    true
+}
+
+fn hardlink_into(src_dir: &Path, out_dir: &Path) -> io::Result<()> {
+    fs::create_dir_all(out_dir)?;
+    for entry in fs::read_dir(src_dir)? {
+        let entry = entry?;
+        let dest = out_dir.join(entry.file_name());
+        let _ = fs::remove_file(&dest);
+        if fs::hard_link(entry.path(), &dest).is_err() {
+            fs::copy(entry.path(), &dest)?;
+        }
+    }
+    Ok(())
 }
 
 fn save_outputs(parsed: &ParsedArguments, key: &str) -> io::Result<()> {
