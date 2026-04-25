@@ -98,13 +98,13 @@ fn is_third_party(input: &Path) -> bool {
 fn try_serve_from_cache(parsed: &ParsedArguments, key: &str) -> bool {
     let root = cache_root();
     let Ok(cache) = DiskCache::new(root.clone()) else {
-        debug!("get-miss: DiskCache::new failed at {}", root.display());
+        info!("get-miss: DiskCache::new failed at {}", root.display());
         return false;
     };
     let Some(src) = cache.get(key) else {
         let final_path = root.join(&key[0..1]).join(&key[1..2]).join(key);
         let meta = fs::symlink_metadata(&final_path);
-        debug!(
+        info!(
             "get-miss: {} key={} root={} metadata={:?}",
             parsed.crate_name,
             key,
