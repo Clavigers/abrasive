@@ -19,19 +19,24 @@ use rustc_args::{ParseOutcome, ParsedArguments, parse_arguments};
 fn main() {
     init_logger();
     let (rustc, rest) = parse_args();
-    let plan = plan_third_party_cache(&rest);
-    if let Some((parsed, key)) = &plan
-        && try_serve_from_cache(parsed, key)
-    {
-        exit(0);
+    // EXPERIMENT: dump the parsed args for every invocation, skip the cache.
+    // Restore the cache hit / cache write blocks below to re-enable.
+    if let Ok(cwd) = env::current_dir() {
+        info!("parse: {:#?}", parse_arguments(&rest, &cwd));
     }
+    // let plan = plan_third_party_cache(&rest);
+    // if let Some((parsed, key)) = &plan
+    //     && try_serve_from_cache(parsed, key)
+    // {
+    //     exit(0);
+    // }
     let exit_code = run_rustc(&rustc, &rest);
-    if exit_code == 0
-        && let Some((parsed, key)) = plan
-        && let Err(e) = save_outputs(&parsed, &key)
-    {
-        warn!("drop-point: cache store failed: {e}");
-    }
+    // if exit_code == 0
+    //     && let Some((parsed, key)) = plan
+    //     && let Err(e) = save_outputs(&parsed, &key)
+    // {
+    //     warn!("drop-point: cache store failed: {e}");
+    // }
     exit(exit_code);
 }
 
