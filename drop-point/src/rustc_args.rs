@@ -701,11 +701,11 @@ pub struct ParsedArguments {
     pub(crate) dep_info: Option<PathBuf>,
     /// If `-C profile-use=PATH` was passed, the path to the profile data file.
     /// See https://doc.rust-lang.org/rustc/profile-guided-optimization.html
-    profile: Option<PathBuf>,
+    pub(crate) profile: Option<PathBuf>,
     /// Set of `--emit` modes requested.
     /// rustc says it emits .rlib for `--emit=metadata`,
     /// see https://github.com/rust-lang/rust/issues/54852
-    emit: HashSet<String>,
+    pub(crate) emit: HashSet<String>,
     /// The value of any `--color` option passed on the commandline.
     color_mode: ColorMode,
     /// Whether `--json` was passed to this invocation.

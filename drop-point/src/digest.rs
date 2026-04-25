@@ -1,11 +1,30 @@
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
+use std::fs::File;
+use std::io;
 use std::iter;
 use std::os::unix::ffi::OsStrExt;
 
 use crate::rustc_args::{IntoArg, ParsedArguments};
 
-pub fn hash_rustc_args(parsed_args: &ParsedArguments, m: &mut blake3::Hasher) {
-    // TODO: this doesn't produce correct arguments if they should be concatenated - should use iter_os_strings
+/// Mix everything that affects the rlib's bytes into the hasher. Cargo's
+/// metadata hash on extern paths and the target/profile flags in argv carry
+/// upstream identity for third-party crates; we hash basenames (not full
+/// paths, not file contents) so two workspaces compiling the same crate from
+/// the same registry produce the same key.
+pub fn hash_rustc_args(parsed_args: &ParsedArguments, m: &mut blake3::Hasher) -> io::Result<()> {
+    hash_argv(parsed_args, m);
+    hash_basenames(parsed_args.externs.iter().filter_map(|p| p.file_name()), m);
+    hash_basenames(parsed_args.staticlibs.iter().filter_map(|p| p.file_name()), m);
+    if let Some(p) = &parsed_args.target_json {
+        io::copy(&mut File::open(p)?, m)?;
+    }
+    Ok(())
+}
+
+fn hash_argv(parsed_args: &ParsedArguments, m: &mut blake3::Hasher) {
+    // TODO: this doesn't produce correct bytes for Concatenated args, but
+    // parse_arguments normalizes everything to Separated, so it's not
+    // reachable today. Switch to iter_os_strings if that ever changes.
     let os_string_arguments: Vec<(OsString, Option<OsString>)> = parsed_args
         .arguments
         .iter()
@@ -55,4 +74,15 @@ pub fn hash_rustc_args(parsed_args: &ParsedArguments, m: &mut blake3::Hasher) {
             })
     };
     m.update(args.as_bytes());
+}
+
+fn hash_basenames<'a>(names: impl Iterator<Item = &'a OsStr>, m: &mut blake3::Hasher) {
+    let mut sorted: Vec<&OsStr> = names.collect();
+    sorted.sort();
+    for n in sorted {
+        m.update(n.as_bytes());
+        // NUL-terminate so adjacent names can't be confused for one longer
+        // name (no rust filename can contain NUL).
+        m.update(b"\0");
+    }
 }
