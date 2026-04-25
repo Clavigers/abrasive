@@ -686,12 +686,13 @@ pub struct ParsedArguments {
     pub(crate) input: PathBuf,
     /// The location of compiler outputs.
     pub(crate) output_dir: PathBuf,
-    /// Paths to extern crates used in the compile.
-    externs: Vec<PathBuf>,
+    /// Paths to extern crates used in the compile. Sorted (cargo doesn't
+    /// guarantee --extern ordering and we need deterministic hash inputs).
+    pub(crate) externs: Vec<PathBuf>,
     /// The directories searched for rlibs.
     crate_link_paths: Vec<PathBuf>,
     /// Static libraries linked to in the compile.
-    staticlibs: Vec<PathBuf>,
+    pub(crate) staticlibs: Vec<PathBuf>,
     /// The crate name passed to --crate-name.
     pub(crate) crate_name: String,
     /// The crate types that will be generated.
