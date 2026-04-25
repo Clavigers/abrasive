@@ -1252,3 +1252,6 @@ pub fn parse_arguments(arguments: &[OsString], cwd: &Path) -> ParseOutcome<Parse
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod parser_tests;
