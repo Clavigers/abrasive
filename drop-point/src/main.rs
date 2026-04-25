@@ -22,19 +22,19 @@ fn main() {
     // EXPERIMENT: dump the raw argv for every invocation, skip the cache.
     // Restore the cache hit / cache write blocks below to re-enable.
     info!("argv: {rest:?}");
-    // let plan = plan_third_party_cache(&rest);
-    // if let Some((parsed, key)) = &plan
-    //     && try_serve_from_cache(parsed, key)
-    // {
-    //     exit(0);
-    // }
+    let plan = plan_third_party_cache(&rest);
+    if let Some((parsed, key)) = &plan
+        && try_serve_from_cache(parsed, key)
+    {
+        exit(0);
+    }
     let exit_code = run_rustc(&rustc, &rest);
-    // if exit_code == 0
-    //     && let Some((parsed, key)) = plan
-    //     && let Err(e) = save_outputs(&parsed, &key)
-    // {
-    //     warn!("drop-point: cache store failed: {e}");
-    // }
+    if exit_code == 0
+        && let Some((parsed, key)) = plan
+        && let Err(e) = save_outputs(&parsed, &key)
+    {
+        warn!("drop-point: cache store failed: {e}");
+    }
     exit(exit_code);
 }
 
