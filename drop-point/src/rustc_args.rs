@@ -686,12 +686,13 @@ pub struct ParsedArguments {
     pub(crate) input: PathBuf,
     /// The location of compiler outputs.
     pub(crate) output_dir: PathBuf,
-    /// Paths to extern crates used in the compile.
-    externs: Vec<PathBuf>,
+    /// Paths to extern crates used in the compile. Sorted (cargo doesn't
+    /// guarantee --extern ordering and we need deterministic hash inputs).
+    pub(crate) externs: Vec<PathBuf>,
     /// The directories searched for rlibs.
     crate_link_paths: Vec<PathBuf>,
     /// Static libraries linked to in the compile.
-    staticlibs: Vec<PathBuf>,
+    pub(crate) staticlibs: Vec<PathBuf>,
     /// The crate name passed to --crate-name.
     pub(crate) crate_name: String,
     /// The crate types that will be generated.
@@ -700,11 +701,11 @@ pub struct ParsedArguments {
     pub(crate) dep_info: Option<PathBuf>,
     /// If `-C profile-use=PATH` was passed, the path to the profile data file.
     /// See https://doc.rust-lang.org/rustc/profile-guided-optimization.html
-    profile: Option<PathBuf>,
+    pub(crate) profile: Option<PathBuf>,
     /// Set of `--emit` modes requested.
     /// rustc says it emits .rlib for `--emit=metadata`,
     /// see https://github.com/rust-lang/rust/issues/54852
-    emit: HashSet<String>,
+    pub(crate) emit: HashSet<String>,
     /// The value of any `--color` option passed on the commandline.
     color_mode: ColorMode,
     /// Whether `--json` was passed to this invocation.
@@ -1107,8 +1108,12 @@ pub fn parse_arguments(arguments: &[OsString], cwd: &Path) -> ParseOutcome<Parse
                 ("extra-filename", Some(value)) => extra_filename = Some(value.to_owned()),
                 ("extra-filename", None) => cannot_cache!("extra-filename"),
                 ("profile-use", Some(v)) => profile = Some(v.clone()),
-                // drop-point caches incremental builds; see INCREMENTAL.md
-                ("incremental", _) => (),
+                // Incremental compilation produces extra outputs we don't
+                // track and the session-state files it writes are not
+                // deterministic across runs. Letting rustc do its incremental
+                // thing locally is also likely faster than a remote hit.
+                // Punt for now; same call sccache makes.
+                ("incremental", _) => cannot_cache!("incremental"),
                 (_, _) => (),
             },
             Some(Unstable(_)) => (),

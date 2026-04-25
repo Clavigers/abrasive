@@ -206,8 +206,9 @@ fn test_parse_arguments_incremental() {
         "--crate-type",
         "lib"
     );
-    // drop-point caches incremental builds (unlike sccache which rejected them).
-    parses!(
+    // Incremental builds are uncacheable: extra outputs we don't track plus
+    // nondeterministic session state. Match sccache's punt.
+    let r = fails!(
         "--emit",
         "link",
         "foo.rs",
@@ -220,6 +221,7 @@ fn test_parse_arguments_incremental() {
         "-C",
         "incremental=/foo"
     );
+    assert_eq!(r, ParseOutcome::CannotCache("incremental", None));
 }
 
 #[test]

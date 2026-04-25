@@ -19,22 +19,19 @@ use rustc_args::{ParseOutcome, ParsedArguments, parse_arguments};
 fn main() {
     init_logger();
     let (rustc, rest) = parse_args();
-    // EXPERIMENT: dump the raw argv for every invocation, skip the cache.
-    // Restore the cache hit / cache write blocks below to re-enable.
-    info!("argv: {rest:?}");
-    // let plan = plan_third_party_cache(&rest);
-    // if let Some((parsed, key)) = &plan
-    //     && try_serve_from_cache(parsed, key)
-    // {
-    //     exit(0);
-    // }
+    let plan = plan_third_party_cache(&rest);
+    if let Some((parsed, key)) = &plan
+        && try_serve_from_cache(parsed, key)
+    {
+        exit(0);
+    }
     let exit_code = run_rustc(&rustc, &rest);
-    // if exit_code == 0
-    //     && let Some((parsed, key)) = plan
-    //     && let Err(e) = save_outputs(&parsed, &key)
-    // {
-    //     warn!("drop-point: cache store failed: {e}");
-    // }
+    if exit_code == 0
+        && let Some((parsed, key)) = plan
+        && let Err(e) = save_outputs(&rustc, &rest, &parsed, &key)
+    {
+        warn!("drop-point: cache store failed: {e}");
+    }
     exit(exit_code);
 }
 
@@ -75,7 +72,10 @@ fn plan_third_party_cache(rest: &[OsString]) -> Option<(ParsedArguments, String)
         return None;
     }
     let mut hasher = Hasher::new();
-    hash_rustc_args(&parsed, &mut hasher);
+    if let Err(e) = hash_rustc_args(&parsed, &mut hasher) {
+        warn!("drop-point: hash failed for {}: {e}", parsed.crate_name);
+        return None;
+    }
     let key = hasher.finalize().to_hex().to_string();
     Some((parsed, key))
 }
@@ -122,35 +122,94 @@ fn hardlink_into(src_dir: &Path, out_dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn save_outputs(parsed: &ParsedArguments, key: &str) -> io::Result<()> {
+fn save_outputs(
+    rustc: &OsStr,
+    rest: &[OsString],
+    parsed: &ParsedArguments,
+    key: &str,
+) -> io::Result<()> {
     let cache = DiskCache::new(cache_root())?;
-    if cache.put(key, |dst| copy_outputs_into(parsed, dst))? {
+    if cache.put(key, |dst| copy_outputs_into(rustc, rest, parsed, dst))? {
         info!("cached {} {}", parsed.crate_name, &key[..16]);
     }
     Ok(())
 }
 
-fn copy_outputs_into(parsed: &ParsedArguments, dst: &Path) -> io::Result<()> {
-    let dep_info = parsed
-        .dep_info
-        .as_ref()
-        .ok_or_else(|| io::Error::other("no dep-info"))?;
-    let stem = dep_info
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .ok_or_else(|| io::Error::other("dep-info missing usable stem"))?;
+fn copy_outputs_into(
+    rustc: &OsStr,
+    rest: &[OsString],
+    parsed: &ParsedArguments,
+    dst: &Path,
+) -> io::Result<()> {
+    let mut names = refine_outputs(parsed, discover_outputs(rustc, rest)?);
+    if let Some(d) = &parsed.dep_info {
+        names.push(d.to_string_lossy().into_owned());
+    }
+    if let Some(p) = &parsed.profile {
+        names.push(p.to_string_lossy().into_owned());
+    }
     let out = &parsed.output_dir;
-    for src in [
-        out.join(format!("lib{stem}.rlib")),
-        out.join(format!("lib{stem}.rmeta")),
-        out.join(dep_info),
-    ] {
+    for name in &names {
+        let src = out.join(name);
         if src.exists() {
-            let name = src.file_name().expect("has file name");
             fs::copy(&src, dst.join(name))?;
         }
     }
     Ok(())
+}
+
+/// Ask rustc which files this invocation would produce. `--print file-names`
+/// short-circuits compilation and writes one filename per line, all relative
+/// to `--out-dir`.
+fn discover_outputs(rustc: &OsStr, rest: &[OsString]) -> io::Result<Vec<String>> {
+    let out = Command::new(rustc)
+        .args(rest)
+        .arg("--print")
+        .arg("file-names")
+        .output()?;
+    if !out.status.success() {
+        return Err(io::Error::other(format!(
+            "rustc --print file-names failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        )));
+    }
+    let stdout =
+        String::from_utf8(out.stdout).map_err(|_| io::Error::other("non-utf8 rustc output"))?;
+    Ok(stdout.lines().map(str::to_owned).collect())
+}
+
+/// Patch up rustc's --print file-names list to match what actually lands on
+/// disk. Two quirks (also present in sccache):
+/// 1. With `--emit=metadata` (no link), rustc still prints binaries that
+///    won't exist; drop them.
+/// 2. rustc doesn't print rmeta files even when --emit=metadata produces
+///    them; synthesize an rmeta name per rlib.
+fn refine_outputs(parsed: &ParsedArguments, mut outputs: Vec<String>) -> Vec<String> {
+    let only_metadata = !parsed.emit.is_empty()
+        && parsed
+            .emit
+            .iter()
+            .all(|e| e == "metadata" || e == "dep-info");
+    if only_metadata {
+        outputs.retain(|o| o.ends_with(".rlib") || o.ends_with(".rmeta"));
+    }
+    if parsed.emit.contains("metadata") {
+        let rlibs: Vec<String> = outputs
+            .iter()
+            .filter(|p| p.ends_with(".rlib"))
+            .cloned()
+            .collect();
+        for lib in rlibs {
+            let rmeta = lib.replacen(".rlib", ".rmeta", 1);
+            if !outputs.contains(&rmeta) {
+                outputs.push(rmeta);
+            }
+            if !parsed.emit.contains("link") {
+                outputs.retain(|p| *p != lib);
+            }
+        }
+    }
+    outputs
 }
 
 fn cache_root() -> PathBuf {
