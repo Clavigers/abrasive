@@ -77,6 +77,7 @@ fn plan_third_party_cache(rest: &[OsString]) -> Option<(ParsedArguments, String)
         return None;
     }
     let key = hasher.finalize().to_hex().to_string();
+    info!("plan: {} key={} argv={:?}", parsed.crate_name, key, rest);
     Some((parsed, key))
 }
 
