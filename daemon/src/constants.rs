@@ -5,4 +5,4 @@ pub const USER_AGENT: &str = "abrasive-daemon";
 /// the same project don't clobber each other. A user is hashed to a
 /// preferred slot for incremental cache affinity; on contention they
 /// fall back to the first free slot.
-pub const SLOTS_PER_SCOPE: usize = 4;
+pub const SLOTS_PER_SCOPE: usize = 1;
