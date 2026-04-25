@@ -17,7 +17,7 @@ fn main() {
 }
 
 fn init_logger() {
-    env_logger::Builder::from_env(Env::default().default_filter_or("debug"))
+    env_logger::Builder::from_env(Env::default().default_filter_or("info"))
         .write_style(env_logger::WriteStyle::Always)
         .format(|buf, record| {
             let style = buf.default_level_style(record.level());
