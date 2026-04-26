@@ -516,7 +516,6 @@ where
 {
     arguments: I,
     arg_info: S,
-    seen_double_dashes: Option<bool>,
     phantom: PhantomData<T>,
 }
 
@@ -534,24 +533,8 @@ where
         ArgsIter {
             arguments,
             arg_info,
-            seen_double_dashes: None,
             phantom: PhantomData,
         }
-    }
-
-    pub fn with_double_dashes(mut self) -> Self {
-        self.seen_double_dashes = Some(false);
-        self
-    }
-
-    fn in_post_double_dash_mode(&mut self, arg: &OsString) -> bool {
-        let Some(seen) = self.seen_double_dashes.as_mut() else {
-            return false;
-        };
-        if !*seen && arg == "--" {
-            *seen = true;
-        }
-        *seen
     }
 
     fn classify_arg(&mut self, arg: OsString) -> ArgParseResult<Argument<T>> {
@@ -575,9 +558,6 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         let arg = self.arguments.next()?;
-        if self.in_post_double_dash_mode(&arg) {
-            return Some(Ok(Argument::Raw(arg)));
-        }
         Some(self.classify_arg(arg))
     }
 }
