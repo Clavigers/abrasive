@@ -68,9 +68,18 @@ fn plan_third_party_cache(rest: &[OsString]) -> Option<(ParsedArguments, String)
     let cwd = env::current_dir().ok()?;
     let parsed = match parse_arguments(rest, &cwd) {
         ParseOutcome::Ok(p) => p,
-        _ => return None,
+        ParseOutcome::CannotCache(why, extra) => {
+            let crate_name = crate_name_from_argv(rest);
+            match extra {
+                Some(e) => debug!("skip {crate_name}: {why} ({e})"),
+                None => debug!("skip {crate_name}: {why}"),
+            }
+            return None;
+        }
+        ParseOutcome::NotCompilation => return None,
     };
     if !is_third_party(&parsed.input) {
+        debug!("skip {}: workspace crate", parsed.crate_name);
         return None;
     }
     let mut hasher = Hasher::new();
@@ -81,6 +90,24 @@ fn plan_third_party_cache(rest: &[OsString]) -> Option<(ParsedArguments, String)
     let key = hasher.finalize().to_hex().to_string();
     debug!("plan: {} key={} argv={:?}", parsed.crate_name, key, rest);
     Some((parsed, key))
+}
+
+/// Best-effort `--crate-name` lookup so we can name what we skipped before
+/// argv parsing finished. Returns "?" when not found.
+fn crate_name_from_argv(rest: &[OsString]) -> String {
+    let mut iter = rest.iter();
+    while let Some(arg) = iter.next() {
+        let s = arg.to_string_lossy();
+        if let Some(name) = s.strip_prefix("--crate-name=") {
+            return name.to_string();
+        }
+        if s == "--crate-name"
+            && let Some(next) = iter.next()
+        {
+            return next.to_string_lossy().into_owned();
+        }
+    }
+    "?".to_string()
 }
 
 /// True when the input source is outside every workspace member dir.
