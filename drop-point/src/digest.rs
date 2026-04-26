@@ -1,10 +1,9 @@
 use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::io;
-use std::iter;
 use std::os::unix::ffi::OsStrExt;
 
-use crate::rustc_args::{IntoArg, ParsedArguments};
+use crate::rustc_args::{Argument, ArgumentValue, ParsedArguments};
 
 /// Mix everything that affects the rlib's bytes into the hasher. Cargo's
 /// metadata hash on extern paths and the target/profile flags in argv carry
@@ -25,58 +24,53 @@ pub fn hash_rustc_args(parsed_args: &ParsedArguments, m: &mut blake3::Hasher) ->
 }
 
 fn hash_argv(parsed_args: &ParsedArguments, m: &mut blake3::Hasher) {
-    // TODO: this doesn't produce correct bytes for Concatenated args, but
-    // parse_arguments normalizes everything to Separated, so it's not
-    // reachable today. Switch to iter_os_strings if that ever changes.
-    let os_string_arguments: Vec<(OsString, Option<OsString>)> = parsed_args
+    let target_json_present = parsed_args.target_json.is_some();
+    let (mut sortables, rest): (Vec<_>, Vec<_>) = parsed_args
         .arguments
         .iter()
-        .map(|arg| {
-            (
-                arg.to_os_string(),
-                arg.get_data().cloned().map(IntoArg::into_arg_os_string),
-            )
-        })
-        .collect();
-
-    // TODO: there will be full paths here, it would be nice to
-    // normalize them so we can get cross-machine cache hits.
-    // A few argument types are not passed in a deterministic order
-    // by cargo: --extern, -L, --cfg. We'll filter those out, sort them,
-    // and append them to the rest of the arguments.
-    let args = {
-        let (mut sortables, rest): (Vec<_>, Vec<_>) = os_string_arguments
-            .iter()
-            // We exclude a few arguments from the hash:
-            //   -L, --extern, --out-dir, --diagnostic-width
-            // These contain paths which aren't relevant to the output, and the compiler inputs
-            // in those paths (rlibs and static libs used in the compilation) are used as hash
-            // inputs below.
-            .filter(|&(arg, _)| {
-                !(arg == "--extern"
-                    || arg == "-L"
-                    || arg == "--check-cfg"
-                    || arg == "--out-dir"
-                    || arg == "--diagnostic-width")
-            })
-            // We also exclude `--target` if it specifies a path to a .json file. The file content
-            // is used as hash input below.
-            // If `--target` specifies a string, it continues to be hashed as part of the arguments.
-            .filter(|&(arg, _)| parsed_args.target_json.is_none() || arg != "--target")
-            // A few argument types were not passed in a deterministic order
-            // by older versions of cargo: --extern, -L, --cfg. We'll filter the rest of those
-            // out, sort them, and append them to the rest of the arguments.
-            .partition(|&(arg, _)| arg == "--cfg");
-        sortables.sort();
+        .filter(|a| should_hash(a, target_json_present))
+        .partition(|a| a.flag_str() == Some("--cfg"));
+    // Older cargo versions emit --cfg in non-deterministic order, so sort
+    // them by their on-the-wire byte representation.
+    sortables.sort_by_cached_key(|a| join(a.iter_os_strings()));
+    let bytes = join(
         rest.into_iter()
             .chain(sortables)
-            .flat_map(|(arg, val)| iter::once(arg).chain(val.as_ref()))
-            .fold(OsString::new(), |mut a, b| {
-                a.push(b);
-                a
-            })
+            .flat_map(|a| a.iter_os_strings()),
+    );
+    m.update(bytes.as_bytes());
+}
+
+/// True when `arg` should contribute to the cache key.
+///
+/// Excludes:
+/// * `--extern`, `-L`, `--out-dir`, `--diagnostic-width`: values are
+///   absolute paths or transient build-environment noise. Upstream identity
+///   for externs/staticlibs is hashed separately (basenames).
+/// * `--check-cfg`: lint hint, doesn't affect output bytes.
+/// * `--target`: only when it points to a JSON file (whose content is
+///   hashed separately). Built-in target name strings stay.
+fn should_hash<T: ArgumentValue>(arg: &Argument<T>, target_json_present: bool) -> bool {
+    let Some(flag) = arg.flag_str() else {
+        return true;
     };
-    m.update(args.as_bytes());
+    if matches!(
+        flag,
+        "--extern" | "-L" | "--check-cfg" | "--out-dir" | "--diagnostic-width"
+    ) {
+        return false;
+    }
+    if target_json_present && flag == "--target" {
+        return false;
+    }
+    true
+}
+
+fn join(parts: impl Iterator<Item = OsString>) -> OsString {
+    parts.fold(OsString::new(), |mut acc, s| {
+        acc.push(s);
+        acc
+    })
 }
 
 fn hash_basenames<'a>(names: impl Iterator<Item = &'a OsStr>, m: &mut blake3::Hasher) {
@@ -89,3 +83,4 @@ fn hash_basenames<'a>(names: impl Iterator<Item = &'a OsStr>, m: &mut blake3::Ha
         m.update(b"\0");
     }
 }
+
