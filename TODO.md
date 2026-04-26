@@ -17,12 +17,6 @@
 [DROP-POINT] Pipelined rmeta serving: on hit, return `.rmeta` immediately even if `.rlib` is still materializing, matching cargo's own pipelining so downstream type-check doesn't wait on upstream codegen
 [DROP-POINT] Source-input identity strategy splits first-party vs third-party. Third-party: rustc argv alone is sufficient. The input source path passed to rustc embeds the registry index hash plus `crate@version` (e.g. `index.crates.io-<hash>/foo-1.2.3/src/lib.rs`), and crates.io is content-addressed and immutable, so identical argv pins to identical bytes. No source hashing or `--emit=dep-info` pass needed for third-party. First-party / workspace crates: still need source hashing (run `rustc --emit=dep-info` like sccache), since workspace crate paths don't carry a version and a crate can `include_str!`/`include_bytes!` arbitrary repo paths outside its own dir.
 
-[SYNC] Source sync writes each received file as a blob in the shared blob store (see [BLOBS]); workspace materialization is a hardlink tree over the blob store
-[SYNC] Blobs chmod 444 in the blob store so build scripts can't silently mutate shared state — EACCES surfaces the problem immediately
-[SYNC] Workspace teardown is `rm -rf <workspace>` (just unlinks hardlinks); blob refcount drops naturally
-[SYNC] Gap-fill during sync checks local + network blob store before asking client for missing blobs — enables cross-user dedup on overlapping source trees
-[SYNC] Keep the existing stat-fingerprint probe + speculative-diff send; CAS gap-fill only kicks in when the speculative send left holes
-
 [BLOBS] Shared blake3-addressed blob store consumed by both [DROP-POINT] and [SYNC]; local replica at `~/.abrasive/blobs/<prefix>/<hash>` on each worker
 [BLOBS] Network blob service as source of truth across workers; per-worker local replica fetches misses on demand
 [BLOBS] Atomic writes via temp-file-then-rename so concurrent builds can't corrupt entries
@@ -53,6 +47,12 @@
 [METRICS] Surface usage to the dashboard; reuse the existing Supabase schema patterns
 
 ## V1 (post-launch)
+
+[SYNC] Source sync writes each received file as a blob in the shared blob store (see [BLOBS]); workspace materialization is a hardlink tree over the blob store
+[SYNC] Blobs chmod 444 in the blob store so build scripts can't silently mutate shared state — EACCES surfaces the problem immediately
+[SYNC] Workspace teardown is `rm -rf <workspace>` (just unlinks hardlinks); blob refcount drops naturally
+[SYNC] Gap-fill during sync checks local + network blob store before asking client for missing blobs — enables cross-user dedup on overlapping source trees
+[SYNC] Keep the existing stat-fingerprint probe + speculative-diff send; CAS gap-fill only kicks in when the speculative send left holes
 
 [SYNC] Promote source sync from a flat `Vec<FileEntry { path, hash }>` manifest to a proper Merkle tree: each directory becomes a content-addressed blob (sorted `(name, kind, child_hash)` list), workspace identity = root directory blob hash. Bonanza-style. Wins: cross-workspace dedup at directory granularity (two users with identical `target/` subtrees → one blob set globally), constant-size top-level state, snapshot identity for replay/debug. Keep the existing stat-fingerprint + speculative-send as the fast path; Merkle structure is the precise/dedup path. Skip the Bonanza protobuf/reference machinery — bincode-encoded directory blobs over blake3 is enough.
 
@@ -89,6 +89,3 @@
 [RUN] Support `cargo run` remotely: capture post-`--` args on the client, send build request, stream built binary back, then exec it locally with the captured args. Use an `If-None-Match`-style protocol to avoid re-shipping unchanged binaries: client includes the hash of its last-cached binary in the build request; after building, remote compares hashes and either responds "match, no bytes" (hit) or sends hash+bytes in one shot (miss). Zero extra RTT, zero wasted bandwidth on hits.
 
 ## ASAP
-
-
-move sourcefile sync stuff into V1 instead of v0
