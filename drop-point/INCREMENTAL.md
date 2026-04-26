@@ -1,1 +1,1 @@
-todo explain this.
+ook so here is what I actually landed on, I only CAS cache third party crates and then reusing the incremental cache gets the rest of the speed gain. right now target reuse is just via the slots mechanism, there is no CAS of target trees a la https://github.com/bazelbuild/rules_rust/pull/3925 thats for later. for now... I actually think this works.   
