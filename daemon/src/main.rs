@@ -473,50 +473,16 @@ fn run_build(stream: &mut WsConn, peer: &str, workspace: &Path, req: BuildReques
     }
     let (cargo_args, run_it) = build_cargo_args(req.cargo_args, req.host_platform);
     let cd_target = build_dir(workspace, req.subdir.as_deref());
-    let ws_members = read_workspace_member_dirs(&cd_target);
     println!(
         "[{peer}] mold -run cargo +nightly {} (in {})",
         cargo_args.join(" "),
         cd_target.display()
     );
-    match spawn_cargo(&cargo_args, &cd_target, ws_members.as_deref()) {
+    match spawn_cargo(&cargo_args, &cd_target) {
         Ok(child) if run_it => forward_run_output(stream, child, peer),
         Ok(child) => forward_build_output(stream, child, peer),
         Err(e) => send_spawn_failure(stream, &e),
     }
-}
-
-fn read_workspace_member_dirs(cd: &Path) -> Option<Vec<PathBuf>> {
-    let out = Command::new("cargo")
-        .arg("+nightly")
-        .arg("metadata")
-        .arg("--no-deps")
-        .arg("--format-version")
-        .arg("1")
-        .arg("--offline")
-        .current_dir(cd)
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
-    if !out.status.success() {
-        return None;
-    }
-    let v: serde_json::Value = serde_json::from_slice(&out.stdout).ok()?;
-    let dirs = v
-        .get("workspace_members")?
-        .as_array()?
-        .iter()
-        .filter_map(|m| parse_path_member_id(m.as_str()?))
-        .collect();
-    Some(dirs)
-}
-
-/// Workspace member IDs look like `path+file:///abs/path/to/crate#0.1.0`.
-/// We pull out the absolute path, since workspace members are always paths.
-fn parse_path_member_id(id: &str) -> Option<PathBuf> {
-    let rest = id.strip_prefix("path+file://")?;
-    let path = rest.split('#').next()?;
-    Some(PathBuf::from(path))
 }
 
 fn build_cargo_args(args: Vec<String>, platform: PlatformTriple) -> (Vec<String>, bool) {
@@ -538,11 +504,7 @@ fn build_dir(workspace: &Path, subdir: Option<&str>) -> PathBuf {
     }
 }
 
-fn spawn_cargo(
-    args: &[String],
-    cd: &Path,
-    workspace_members: Option<&[PathBuf]>,
-) -> std::io::Result<Child> {
+fn spawn_cargo(args: &[String], cd: &Path) -> std::io::Result<Child> {
     let mut cmd = Command::new("mold");
     cmd.arg("-run")
         .arg("cargo")
@@ -569,17 +531,6 @@ fn spawn_cargo(
         .env("CARGO_TERM_COLOR", "always")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    // drop-point reads this to decide whether the input source path is
-    // first-party (skip cache) or third-party (cache by argv). Colon-separated
-    // because that's how PATH-style env vars work on linux.
-    if let Some(dirs) = workspace_members {
-        let joined = dirs
-            .iter()
-            .map(|p| p.to_string_lossy().into_owned())
-            .collect::<Vec<_>>()
-            .join(":");
-        cmd.env("DROP_POINT_WORKSPACE_MEMBERS", joined);
-    }
     cmd.spawn()
 }
 
