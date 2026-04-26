@@ -105,13 +105,6 @@ impl<T: ArgumentValue> Argument<T> {
         }
     }
 
-    pub fn to_os_string(&self) -> OsString {
-        match *self {
-            Argument::Raw(ref s) | Argument::UnknownFlag(ref s) => s.clone(),
-            Argument::Flag(ref s, _) | Argument::WithValue(ref s, _, _) => s.into(),
-        }
-    }
-
     pub fn flag_str(&self) -> Option<&'static str> {
         match *self {
             Argument::Flag(s, _) | Argument::WithValue(s, _, _) => Some(s),
