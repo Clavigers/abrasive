@@ -5,7 +5,7 @@
 
 use std::fs;
 use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::cache_io::{CacheIoError, CacheRead, CacheWrite};
 
@@ -58,9 +58,4 @@ impl DiskCache {
         // Two-level prefix sharding so no single dir gets too big.
         self.root.join(&key[0..1]).join(&key[1..2]).join(key)
     }
-}
-
-/// True if a cache entry exists for this key, without opening it.
-pub fn entry_path(root: &Path, key: &str) -> PathBuf {
-    root.join(&key[0..1]).join(&key[1..2]).join(key)
 }

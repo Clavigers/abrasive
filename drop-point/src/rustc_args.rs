@@ -2,6 +2,7 @@
 // its basically sccache/src/compiler/args.rs and parts of sccache/src/compiler/rust.rs
 // with all the generic machinery removed, also lightly updated for 2026 rust.
 
+use log::debug;
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::ffi::OsString;
@@ -10,7 +11,6 @@ use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::str;
 use std::sync::LazyLock;
-use log::debug;
 use thiserror::Error;
 
 pub type ArgParseResult<T> = Result<T, ArgParseError>;
@@ -988,13 +988,28 @@ static ARGS: &[ArgInfo<ArgData>] = &[
     take_arg!("--codegen", ArgCodegen, CanBeSeparated(b'='), CodeGen),
     take_arg!("--color", String, CanBeSeparated(b'='), Color),
     take_arg!("--crate-name", String, CanBeSeparated(b'='), CrateName),
-    take_arg!("--crate-type", ArgCrateTypes, CanBeSeparated(b'='), CrateType),
+    take_arg!(
+        "--crate-type",
+        ArgCrateTypes,
+        CanBeSeparated(b'='),
+        CrateType
+    ),
     take_arg!("--deny", OsString, CanBeSeparated(b'='), PassThrough),
-    take_arg!("--diagnostic-width", OsString, CanBeSeparated(b'='), PassThrough),
+    take_arg!(
+        "--diagnostic-width",
+        OsString,
+        CanBeSeparated(b'='),
+        PassThrough
+    ),
     take_arg!("--edition", OsString, CanBeSeparated(b'='), PassThrough),
     take_arg!("--emit", String, CanBeSeparated(b'='), Emit),
     take_arg!("--env-set", OsString, CanBeSeparated(b'='), PassThrough),
-    take_arg!("--error-format", OsString, CanBeSeparated(b'='), PassThrough),
+    take_arg!(
+        "--error-format",
+        OsString,
+        CanBeSeparated(b'='),
+        PassThrough
+    ),
     take_arg!("--explain", OsString, CanBeSeparated(b'='), NotCompilation),
     take_arg!("--extern", ArgExtern, CanBeSeparated(b'='), Extern),
     take_arg!("--forbid", OsString, CanBeSeparated(b'='), PassThrough),
@@ -1004,8 +1019,18 @@ static ARGS: &[ArgInfo<ArgData>] = &[
     take_arg!("--out-dir", PathBuf, CanBeSeparated(b'='), OutDir),
     take_arg!("--pretty", OsString, CanBeSeparated(b'='), NotCompilation),
     take_arg!("--print", OsString, CanBeSeparated(b'='), NotCompilation),
-    take_arg!("--remap-path-prefix", OsString, CanBeSeparated(b'='), PassThrough),
-    take_arg!("--remap-path-scope", OsString, CanBeSeparated(b'='), PassThrough),
+    take_arg!(
+        "--remap-path-prefix",
+        OsString,
+        CanBeSeparated(b'='),
+        PassThrough
+    ),
+    take_arg!(
+        "--remap-path-scope",
+        OsString,
+        CanBeSeparated(b'='),
+        PassThrough
+    ),
     take_arg!("--sysroot", PathBuf, CanBeSeparated(b'='), TooHardPath),
     take_arg!("--target", ArgTarget, CanBeSeparated(b'='), Target),
     take_arg!("--unpretty", OsString, CanBeSeparated(b'='), NotCompilation),

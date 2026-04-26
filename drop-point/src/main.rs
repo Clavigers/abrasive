@@ -3,7 +3,6 @@ use env_logger::Env;
 use log::{debug, error, info, warn};
 use std::env;
 use std::ffi::{OsStr, OsString};
-use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, exit};
@@ -15,7 +14,7 @@ mod rustc_args;
 
 use cache_io::{CacheWrite, FileObjectSource};
 use digest::hash_rustc_args;
-use disk_cache::{DiskCache, entry_path};
+use disk_cache::DiskCache;
 use rustc_args::{ParseOutcome, ParsedArguments, parse_arguments};
 
 fn main() {
@@ -38,7 +37,7 @@ fn main() {
 }
 
 fn init_logger() {
-    env_logger::Builder::from_env(Env::default().default_filter_or("info"))
+    env_logger::Builder::from_env(Env::default().default_filter_or("debug"))
         .write_style(env_logger::WriteStyle::Always)
         .format(|buf, record| {
             let style = buf.default_level_style(record.level());
@@ -88,7 +87,6 @@ fn plan_third_party_cache(rest: &[OsString]) -> Option<(ParsedArguments, String)
         return None;
     }
     let key = hasher.finalize().to_hex().to_string();
-    debug!("plan: {} key={} argv={:?}", parsed.crate_name, key, rest);
     Some((parsed, key))
 }
 
@@ -130,24 +128,20 @@ fn try_serve_from_cache(
     parsed: &ParsedArguments,
     key: &str,
 ) -> bool {
-    let root = cache_root();
-    let Ok(cache) = DiskCache::new(root.clone()) else {
-        debug!("get-miss: DiskCache::new failed at {}", root.display());
+    let Ok(cache) = DiskCache::new(cache_root()) else {
         return false;
     };
     let entry = match cache.get(key) {
         Ok(Some(e)) => e,
         Ok(None) => {
-            let path = entry_path(&root, key);
-            let meta = fs::symlink_metadata(&path);
-            debug!(
-                "get-miss: {} key={} entry_path={:?} metadata={:?}",
-                parsed.crate_name, key, path, meta,
-            );
+            debug!("miss {} {}", parsed.crate_name, &key[..16]);
             return false;
         }
         Err(e) => {
-            warn!("drop-point: cache read error for {}: {e}", parsed.crate_name);
+            warn!(
+                "drop-point: cache read error for {}: {e}",
+                parsed.crate_name
+            );
             return false;
         }
     };
@@ -172,21 +166,13 @@ fn save_outputs(
     parsed: &ParsedArguments,
     key: &str,
 ) -> io::Result<()> {
-    let root = cache_root();
-    let cache = DiskCache::new(root.clone())?;
+    let cache = DiskCache::new(cache_root())?;
     let objects = plan_outputs(rustc, rest, parsed)?;
     let entry = CacheWrite::from_objects(objects)
         .map_err(|e| io::Error::other(format!("build cache entry: {e}")))?;
     let wrote = cache
         .put(key, entry)
         .map_err(|e| io::Error::other(format!("put: {e}")))?;
-    debug!(
-        "put: {} key={} root={} wrote={}",
-        parsed.crate_name,
-        key,
-        root.display(),
-        wrote,
-    );
     if wrote {
         info!("cached {} {}", parsed.crate_name, &key[..16]);
     }

@@ -14,7 +14,10 @@ use crate::rustc_args::{IntoArg, ParsedArguments};
 pub fn hash_rustc_args(parsed_args: &ParsedArguments, m: &mut blake3::Hasher) -> io::Result<()> {
     hash_argv(parsed_args, m);
     hash_basenames(parsed_args.externs.iter().filter_map(|p| p.file_name()), m);
-    hash_basenames(parsed_args.staticlibs.iter().filter_map(|p| p.file_name()), m);
+    hash_basenames(
+        parsed_args.staticlibs.iter().filter_map(|p| p.file_name()),
+        m,
+    );
     if let Some(p) = &parsed_args.target_json {
         io::copy(&mut File::open(p)?, m)?;
     }
