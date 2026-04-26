@@ -75,32 +75,17 @@ pub enum Argument<T> {
     WithValue(&'static str, T, ArgDisposition),
 }
 
-/// Target form for collapsing an `Argument`'s `ArgDisposition` to a canonical
-/// shape. Used to make `--out-dir=foo` and `--out-dir foo` produce the same
-/// bytes when re-serialized for the cache key, regardless of how the user
-/// originally wrote them. Only two variants because there are only two ways
-/// to write a flag and its value: glued together or as two separate argv
-/// elements.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NormalizedDisposition {
-    Separated,
-    Concatenated,
-}
-
 impl<T: ArgumentValue> Argument<T> {
-    /// For arguments that allow both a concatenated or separated disposition,
-    /// normalize a parsed argument to a preferred disposition.
-    pub fn normalize(self, disposition: NormalizedDisposition) -> Self {
+    /// Collapse `CanBeConcatenated`/`CanBeSeparated` to plain `Separated` so
+    /// that `--out-dir=foo` and `--out-dir foo` produce the same bytes when
+    /// re-serialized for the cache key, regardless of how the user wrote
+    /// them. Other dispositions are returned unchanged.
+    pub fn normalize(self) -> Self {
         match self {
-            Argument::WithValue(s, v, ArgDisposition::CanBeConcatenated(d))
-            | Argument::WithValue(s, v, ArgDisposition::CanBeSeparated(d)) => Argument::WithValue(
-                s,
-                v,
-                match disposition {
-                    NormalizedDisposition::Separated => ArgDisposition::Separated,
-                    NormalizedDisposition::Concatenated => ArgDisposition::Concatenated(d),
-                },
-            ),
+            Argument::WithValue(s, v, ArgDisposition::CanBeConcatenated(_))
+            | Argument::WithValue(s, v, ArgDisposition::CanBeSeparated(_)) => {
+                Argument::WithValue(s, v, ArgDisposition::Separated)
+            }
             a => a,
         }
     }
@@ -1159,7 +1144,7 @@ pub fn parse_arguments(arguments: &[OsString], cwd: &Path) -> ParseOutcome<Parse
         // strip colors if necessary.
         match arg.get_data() {
             Some(Color(_)) => {}
-            _ => args.push(arg.normalize(NormalizedDisposition::Separated)),
+            _ => args.push(arg.normalize()),
         }
     }
 
