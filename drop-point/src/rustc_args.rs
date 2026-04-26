@@ -76,10 +76,12 @@ pub enum Argument<T> {
 }
 
 impl<T: ArgumentValue> Argument<T> {
-    /// Collapse `CanBeConcatenated`/`CanBeSeparated` to plain `Separated` so
-    /// that `--out-dir=foo` and `--out-dir foo` produce the same bytes when
-    /// re-serialized for the cache key, regardless of how the user wrote
-    /// them. Other dispositions are returned unchanged.
+    /// Pick a single canonical spelling for arguments cargo could have
+    /// written either way: `--flag=value` and `--flag value` both come out
+    /// as the two-argv-element form. Lets downstream consumers (the
+    /// cache-key hasher, future re-emission to a worker) compare argv
+    /// without caring which spelling cargo originally chose. Args that
+    /// aren't ambiguous pass through unchanged.
     pub fn normalize(self) -> Self {
         match self {
             Argument::WithValue(s, v, ArgDisposition::CanBeConcatenated(_))
