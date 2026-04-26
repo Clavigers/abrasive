@@ -2,6 +2,7 @@
 // its basically sccache/src/compiler/args.rs and parts of sccache/src/compiler/rust.rs
 // with all the generic machinery removed, also lightly updated for 2026 rust.
 
+use log::debug;
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::ffi::OsString;
@@ -10,7 +11,6 @@ use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::str;
 use std::sync::LazyLock;
-use log::debug;
 use thiserror::Error;
 
 pub type ArgParseResult<T> = Result<T, ArgParseError>;
@@ -75,40 +75,20 @@ pub enum Argument<T> {
     WithValue(&'static str, T, ArgDisposition),
 }
 
-/// Target form for collapsing an `Argument`'s `ArgDisposition` to a canonical
-/// shape. Used to make `--out-dir=foo` and `--out-dir foo` produce the same
-/// bytes when re-serialized for the cache key, regardless of how the user
-/// originally wrote them. Only two variants because there are only two ways
-/// to write a flag and its value: glued together or as two separate argv
-/// elements.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NormalizedDisposition {
-    Separated,
-    Concatenated,
-}
-
 impl<T: ArgumentValue> Argument<T> {
-    /// For arguments that allow both a concatenated or separated disposition,
-    /// normalize a parsed argument to a preferred disposition.
-    pub fn normalize(self, disposition: NormalizedDisposition) -> Self {
+    /// Pick a single canonical spelling for arguments cargo could have
+    /// written either way: `--flag=value` and `--flag value` both come out
+    /// as the two-argv-element form. Lets downstream consumers (the
+    /// cache-key hasher, future re-emission to a worker) compare argv
+    /// without caring which spelling cargo originally chose. Args that
+    /// aren't ambiguous pass through unchanged.
+    pub fn normalize(self) -> Self {
         match self {
-            Argument::WithValue(s, v, ArgDisposition::CanBeConcatenated(d))
-            | Argument::WithValue(s, v, ArgDisposition::CanBeSeparated(d)) => Argument::WithValue(
-                s,
-                v,
-                match disposition {
-                    NormalizedDisposition::Separated => ArgDisposition::Separated,
-                    NormalizedDisposition::Concatenated => ArgDisposition::Concatenated(d),
-                },
-            ),
+            Argument::WithValue(s, v, ArgDisposition::CanBeConcatenated(_))
+            | Argument::WithValue(s, v, ArgDisposition::CanBeSeparated(_)) => {
+                Argument::WithValue(s, v, ArgDisposition::Separated)
+            }
             a => a,
-        }
-    }
-
-    pub fn to_os_string(&self) -> OsString {
-        match *self {
-            Argument::Raw(ref s) | Argument::UnknownFlag(ref s) => s.clone(),
-            Argument::Flag(ref s, _) | Argument::WithValue(ref s, _, _) => s.into(),
         }
     }
 
@@ -361,9 +341,9 @@ impl<T: ArgumentValue> ArgInfo<T> {
             ) if arg.starts_with(s) => match d {
                 None => Ordering::Equal,
                 Some(d) if arg.len() > s.len() => arg.as_bytes()[s.len()].cmp(d),
-                _ => s.cmp(&arg),
+                _ => s.cmp(arg),
             },
-            _ => s.cmp(&arg),
+            _ => s.cmp(arg),
         }
     }
 
@@ -516,7 +496,6 @@ where
 {
     arguments: I,
     arg_info: S,
-    seen_double_dashes: Option<bool>,
     phantom: PhantomData<T>,
 }
 
@@ -534,24 +513,8 @@ where
         ArgsIter {
             arguments,
             arg_info,
-            seen_double_dashes: None,
             phantom: PhantomData,
         }
-    }
-
-    pub fn with_double_dashes(mut self) -> Self {
-        self.seen_double_dashes = Some(false);
-        self
-    }
-
-    fn in_post_double_dash_mode(&mut self, arg: &OsString) -> bool {
-        let Some(seen) = self.seen_double_dashes.as_mut() else {
-            return false;
-        };
-        if !*seen && arg == "--" {
-            *seen = true;
-        }
-        *seen
     }
 
     fn classify_arg(&mut self, arg: OsString) -> ArgParseResult<Argument<T>> {
@@ -575,9 +538,6 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         let arg = self.arguments.next()?;
-        if self.in_post_double_dash_mode(&arg) {
-            return Some(Ok(Argument::Raw(arg)));
-        }
         Some(self.classify_arg(arg))
     }
 }
@@ -988,13 +948,28 @@ static ARGS: &[ArgInfo<ArgData>] = &[
     take_arg!("--codegen", ArgCodegen, CanBeSeparated(b'='), CodeGen),
     take_arg!("--color", String, CanBeSeparated(b'='), Color),
     take_arg!("--crate-name", String, CanBeSeparated(b'='), CrateName),
-    take_arg!("--crate-type", ArgCrateTypes, CanBeSeparated(b'='), CrateType),
+    take_arg!(
+        "--crate-type",
+        ArgCrateTypes,
+        CanBeSeparated(b'='),
+        CrateType
+    ),
     take_arg!("--deny", OsString, CanBeSeparated(b'='), PassThrough),
-    take_arg!("--diagnostic-width", OsString, CanBeSeparated(b'='), PassThrough),
+    take_arg!(
+        "--diagnostic-width",
+        OsString,
+        CanBeSeparated(b'='),
+        PassThrough
+    ),
     take_arg!("--edition", OsString, CanBeSeparated(b'='), PassThrough),
     take_arg!("--emit", String, CanBeSeparated(b'='), Emit),
     take_arg!("--env-set", OsString, CanBeSeparated(b'='), PassThrough),
-    take_arg!("--error-format", OsString, CanBeSeparated(b'='), PassThrough),
+    take_arg!(
+        "--error-format",
+        OsString,
+        CanBeSeparated(b'='),
+        PassThrough
+    ),
     take_arg!("--explain", OsString, CanBeSeparated(b'='), NotCompilation),
     take_arg!("--extern", ArgExtern, CanBeSeparated(b'='), Extern),
     take_arg!("--forbid", OsString, CanBeSeparated(b'='), PassThrough),
@@ -1004,8 +979,18 @@ static ARGS: &[ArgInfo<ArgData>] = &[
     take_arg!("--out-dir", PathBuf, CanBeSeparated(b'='), OutDir),
     take_arg!("--pretty", OsString, CanBeSeparated(b'='), NotCompilation),
     take_arg!("--print", OsString, CanBeSeparated(b'='), NotCompilation),
-    take_arg!("--remap-path-prefix", OsString, CanBeSeparated(b'='), PassThrough),
-    take_arg!("--remap-path-scope", OsString, CanBeSeparated(b'='), PassThrough),
+    take_arg!(
+        "--remap-path-prefix",
+        OsString,
+        CanBeSeparated(b'='),
+        PassThrough
+    ),
+    take_arg!(
+        "--remap-path-scope",
+        OsString,
+        CanBeSeparated(b'='),
+        PassThrough
+    ),
     take_arg!("--sysroot", PathBuf, CanBeSeparated(b'='), TooHardPath),
     take_arg!("--target", ArgTarget, CanBeSeparated(b'='), Target),
     take_arg!("--unpretty", OsString, CanBeSeparated(b'='), NotCompilation),
@@ -1161,7 +1146,7 @@ pub fn parse_arguments(arguments: &[OsString], cwd: &Path) -> ParseOutcome<Parse
         // strip colors if necessary.
         match arg.get_data() {
             Some(Color(_)) => {}
-            _ => args.push(arg.normalize(NormalizedDisposition::Separated)),
+            _ => args.push(arg.normalize()),
         }
     }
 

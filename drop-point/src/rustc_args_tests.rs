@@ -281,12 +281,8 @@ fn test_argsiter() {
         "-plop",
         "-quxbar",
         "-qux=value",
-        "--",
-        "non_flag",
-        "-flag-after-double-dashes",
     ];
     let actual: Vec<_> = ArgsIter::new(args.iter().map(OsString::from), &ARGS[..])
-        .with_double_dashes()
         .map(|r| r.unwrap())
         .collect();
     let expected = vec![
@@ -309,9 +305,6 @@ fn test_argsiter() {
             ArgData::Qux("value"),
             CanBeSeparated(b'=')
         )),
-        arg!(Raw("--")),
-        arg!(Raw("non_flag")),
-        arg!(Raw("-flag-after-double-dashes")),
     ];
     assert_eq!(actual, expected);
 }
