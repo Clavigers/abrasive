@@ -4,8 +4,8 @@
 //! that a future change to digest.rs / rustc_args.rs that quietly changes
 //! the hash-input set fails here instead of silently invalidating caches.
 
-use super::hash_rustc_args;
-use crate::rustc_args::{ParseOutcome, parse_arguments};
+use drop_point::digest::hash_rustc_args;
+use drop_point::rustc_args::{ParseOutcome, parse_arguments};
 use std::ffi::OsString;
 use std::path::Path;
 

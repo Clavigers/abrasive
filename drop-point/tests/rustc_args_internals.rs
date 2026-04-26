@@ -1,4 +1,11 @@
-use super::*;
+use drop_point::rustc_args::{
+    ArgDisposition, ArgInfo, ArgParseError, ArgParseResult, ArgsIter, Argument, ArgumentValue,
+    FromArg, IntoArg, SearchableArgInfo, bsearch,
+};
+use drop_point::{ArgData, flag, take_arg};
+use std::cmp::Ordering;
+use std::ffi::OsString;
+use std::path::PathBuf;
 
 macro_rules! ovec {
     ($($x:expr),* $(,)?) => {
@@ -56,67 +63,67 @@ use self::ArgData::*;
 #[allow(clippy::cognitive_complexity)]
 fn test_arginfo_cmp() {
     let info = flag!("-foo", FooFlag);
-    assert_eq!(info.cmp("-foo"), Ordering::Equal);
-    assert_eq!(info.cmp("bar"), Ordering::Less);
-    assert_eq!(info.cmp("-bar"), Ordering::Greater);
-    assert_eq!(info.cmp("-qux"), Ordering::Less);
-    assert_eq!(info.cmp("-foobar"), Ordering::Less);
-    assert_eq!(info.cmp("-foo="), Ordering::Less);
-    assert_eq!(info.cmp("-foo=bar"), Ordering::Less);
+    assert_eq!(info.cmp_arg("-foo"), Ordering::Equal);
+    assert_eq!(info.cmp_arg("bar"), Ordering::Less);
+    assert_eq!(info.cmp_arg("-bar"), Ordering::Greater);
+    assert_eq!(info.cmp_arg("-qux"), Ordering::Less);
+    assert_eq!(info.cmp_arg("-foobar"), Ordering::Less);
+    assert_eq!(info.cmp_arg("-foo="), Ordering::Less);
+    assert_eq!(info.cmp_arg("-foo=bar"), Ordering::Less);
 
     let info = take_arg!("-foo", OsString, Separated, Foo);
-    assert_eq!(info.cmp("-foo"), Ordering::Equal);
-    assert_eq!(info.cmp("bar"), Ordering::Less);
-    assert_eq!(info.cmp("-bar"), Ordering::Greater);
-    assert_eq!(info.cmp("-qux"), Ordering::Less);
-    assert_eq!(info.cmp("-foobar"), Ordering::Less);
-    assert_eq!(info.cmp("-foo="), Ordering::Less);
-    assert_eq!(info.cmp("-foo=bar"), Ordering::Less);
+    assert_eq!(info.cmp_arg("-foo"), Ordering::Equal);
+    assert_eq!(info.cmp_arg("bar"), Ordering::Less);
+    assert_eq!(info.cmp_arg("-bar"), Ordering::Greater);
+    assert_eq!(info.cmp_arg("-qux"), Ordering::Less);
+    assert_eq!(info.cmp_arg("-foobar"), Ordering::Less);
+    assert_eq!(info.cmp_arg("-foo="), Ordering::Less);
+    assert_eq!(info.cmp_arg("-foo=bar"), Ordering::Less);
 
     let info = take_arg!("-foo", OsString, Concatenated, Foo);
-    assert_eq!(info.cmp("-foo"), Ordering::Equal);
-    assert_eq!(info.cmp("bar"), Ordering::Less);
-    assert_eq!(info.cmp("-bar"), Ordering::Greater);
-    assert_eq!(info.cmp("-qux"), Ordering::Less);
-    assert_eq!(info.cmp("-foobar"), Ordering::Equal);
-    assert_eq!(info.cmp("-foo="), Ordering::Equal);
-    assert_eq!(info.cmp("-foo=bar"), Ordering::Equal);
+    assert_eq!(info.cmp_arg("-foo"), Ordering::Equal);
+    assert_eq!(info.cmp_arg("bar"), Ordering::Less);
+    assert_eq!(info.cmp_arg("-bar"), Ordering::Greater);
+    assert_eq!(info.cmp_arg("-qux"), Ordering::Less);
+    assert_eq!(info.cmp_arg("-foobar"), Ordering::Equal);
+    assert_eq!(info.cmp_arg("-foo="), Ordering::Equal);
+    assert_eq!(info.cmp_arg("-foo=bar"), Ordering::Equal);
 
     let info = take_arg!("-foo", OsString, Concatenated(b'='), Foo);
-    assert_eq!(info.cmp("-foo"), Ordering::Equal);
-    assert_eq!(info.cmp("bar"), Ordering::Less);
-    assert_eq!(info.cmp("-bar"), Ordering::Greater);
-    assert_eq!(info.cmp("-qux"), Ordering::Less);
-    assert_eq!(info.cmp("-foobar"), Ordering::Greater);
-    assert_eq!(info.cmp("-foo="), Ordering::Equal);
-    assert_eq!(info.cmp("-foo=bar"), Ordering::Equal);
+    assert_eq!(info.cmp_arg("-foo"), Ordering::Equal);
+    assert_eq!(info.cmp_arg("bar"), Ordering::Less);
+    assert_eq!(info.cmp_arg("-bar"), Ordering::Greater);
+    assert_eq!(info.cmp_arg("-qux"), Ordering::Less);
+    assert_eq!(info.cmp_arg("-foobar"), Ordering::Greater);
+    assert_eq!(info.cmp_arg("-foo="), Ordering::Equal);
+    assert_eq!(info.cmp_arg("-foo=bar"), Ordering::Equal);
 
     let info = take_arg!("-foo", OsString, CanBeConcatenated(b'='), Foo);
-    assert_eq!(info.cmp("-foo"), Ordering::Equal);
-    assert_eq!(info.cmp("bar"), Ordering::Less);
-    assert_eq!(info.cmp("-bar"), Ordering::Greater);
-    assert_eq!(info.cmp("-qux"), Ordering::Less);
-    assert_eq!(info.cmp("-foobar"), Ordering::Greater);
-    assert_eq!(info.cmp("-foo="), Ordering::Equal);
-    assert_eq!(info.cmp("-foo=bar"), Ordering::Equal);
+    assert_eq!(info.cmp_arg("-foo"), Ordering::Equal);
+    assert_eq!(info.cmp_arg("bar"), Ordering::Less);
+    assert_eq!(info.cmp_arg("-bar"), Ordering::Greater);
+    assert_eq!(info.cmp_arg("-qux"), Ordering::Less);
+    assert_eq!(info.cmp_arg("-foobar"), Ordering::Greater);
+    assert_eq!(info.cmp_arg("-foo="), Ordering::Equal);
+    assert_eq!(info.cmp_arg("-foo=bar"), Ordering::Equal);
 
     let info = take_arg!("-foo", OsString, CanBeSeparated, Foo);
-    assert_eq!(info.cmp("-foo"), Ordering::Equal);
-    assert_eq!(info.cmp("bar"), Ordering::Less);
-    assert_eq!(info.cmp("-bar"), Ordering::Greater);
-    assert_eq!(info.cmp("-qux"), Ordering::Less);
-    assert_eq!(info.cmp("-foobar"), Ordering::Equal);
-    assert_eq!(info.cmp("-foo="), Ordering::Equal);
-    assert_eq!(info.cmp("-foo=bar"), Ordering::Equal);
+    assert_eq!(info.cmp_arg("-foo"), Ordering::Equal);
+    assert_eq!(info.cmp_arg("bar"), Ordering::Less);
+    assert_eq!(info.cmp_arg("-bar"), Ordering::Greater);
+    assert_eq!(info.cmp_arg("-qux"), Ordering::Less);
+    assert_eq!(info.cmp_arg("-foobar"), Ordering::Equal);
+    assert_eq!(info.cmp_arg("-foo="), Ordering::Equal);
+    assert_eq!(info.cmp_arg("-foo=bar"), Ordering::Equal);
 
     let info = take_arg!("-foo", OsString, CanBeSeparated(b'='), Foo);
-    assert_eq!(info.cmp("-foo"), Ordering::Equal);
-    assert_eq!(info.cmp("bar"), Ordering::Less);
-    assert_eq!(info.cmp("-bar"), Ordering::Greater);
-    assert_eq!(info.cmp("-qux"), Ordering::Less);
-    assert_eq!(info.cmp("-foobar"), Ordering::Greater);
-    assert_eq!(info.cmp("-foo="), Ordering::Equal);
-    assert_eq!(info.cmp("-foo=bar"), Ordering::Equal);
+    assert_eq!(info.cmp_arg("-foo"), Ordering::Equal);
+    assert_eq!(info.cmp_arg("bar"), Ordering::Less);
+    assert_eq!(info.cmp_arg("-bar"), Ordering::Greater);
+    assert_eq!(info.cmp_arg("-qux"), Ordering::Less);
+    assert_eq!(info.cmp_arg("-foobar"), Ordering::Greater);
+    assert_eq!(info.cmp_arg("-foo="), Ordering::Equal);
+    assert_eq!(info.cmp_arg("-foo=bar"), Ordering::Equal);
 }
 
 #[test]
