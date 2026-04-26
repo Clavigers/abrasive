@@ -361,9 +361,9 @@ impl<T: ArgumentValue> ArgInfo<T> {
             ) if arg.starts_with(s) => match d {
                 None => Ordering::Equal,
                 Some(d) if arg.len() > s.len() => arg.as_bytes()[s.len()].cmp(d),
-                _ => s.cmp(&arg),
+                _ => s.cmp(arg),
             },
-            _ => s.cmp(&arg),
+            _ => s.cmp(arg),
         }
     }
 
