@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io;
 use std::os::unix::ffi::OsStrExt;
 
-use crate::rustc_args::{Argument, ArgumentValue, ParsedArguments};
+use crate::rustc_args::{Argument, ParsedArguments};
 
 /// Mix everything that affects the rlib's bytes into the hasher. Cargo's
 /// metadata hash on extern paths and the target/profile flags in argv carry
@@ -50,7 +50,7 @@ fn hash_argv(parsed_args: &ParsedArguments, m: &mut blake3::Hasher) {
 /// * `--check-cfg`: lint hint, doesn't affect output bytes.
 /// * `--target`: only when it points to a JSON file (whose content is
 ///   hashed separately). Built-in target name strings stay.
-fn should_hash<T: ArgumentValue>(arg: &Argument<T>, target_json_present: bool) -> bool {
+fn should_hash(arg: &Argument, target_json_present: bool) -> bool {
     let Some(flag) = arg.flag_str() else {
         return true;
     };

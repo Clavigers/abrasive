@@ -1,10 +1,12 @@
 use drop_point::rustc_args::{
-    ArgDisposition, ArgInfo, ArgParseError, ArgsIter, Argument, FromArg, bsearch,
+    ArgData, ArgDisposition, ArgInfo, ArgParseError, ArgsIter, Argument, FromArg,
 };
-use drop_point::{ArgData, flag, take_arg};
+use drop_point::{flag, take_arg};
 use std::cmp::Ordering;
 use std::ffi::OsString;
 use std::path::PathBuf;
+
+use ArgData::*;
 
 macro_rules! ovec {
     ($($x:expr),* $(,)?) => {
@@ -50,17 +52,15 @@ macro_rules! arg {
     };
 }
 
-ArgData! {
-    FooFlag,
-    Foo(OsString),
-}
-
-use self::ArgData::*;
+// Tests below tag arbitrary `-foo`-style flags with production `ArgData`
+// variants like `TooHardFlag` / `NotCompilation` purely as placeholder
+// payloads. The variants' production semantics don't apply here; we're only
+// exercising the parser machinery (cmp, process, ArgsIter routing).
 
 #[test]
 #[allow(clippy::cognitive_complexity)]
 fn test_arginfo_cmp() {
-    let info = flag!("-foo", FooFlag);
+    let info = flag!("-foo", TooHardFlag);
     assert_eq!(info.cmp_arg("-foo"), Ordering::Equal);
     assert_eq!(info.cmp_arg("bar"), Ordering::Less);
     assert_eq!(info.cmp_arg("-bar"), Ordering::Greater);
@@ -69,7 +69,7 @@ fn test_arginfo_cmp() {
     assert_eq!(info.cmp_arg("-foo="), Ordering::Less);
     assert_eq!(info.cmp_arg("-foo=bar"), Ordering::Less);
 
-    let info = take_arg!("-foo", OsString, Separated, Foo);
+    let info = take_arg!("-foo", OsString, Separated, NotCompilation);
     assert_eq!(info.cmp_arg("-foo"), Ordering::Equal);
     assert_eq!(info.cmp_arg("bar"), Ordering::Less);
     assert_eq!(info.cmp_arg("-bar"), Ordering::Greater);
@@ -78,7 +78,7 @@ fn test_arginfo_cmp() {
     assert_eq!(info.cmp_arg("-foo="), Ordering::Less);
     assert_eq!(info.cmp_arg("-foo=bar"), Ordering::Less);
 
-    let info = take_arg!("-foo", OsString, Concatenated, Foo);
+    let info = take_arg!("-foo", OsString, Concatenated, NotCompilation);
     assert_eq!(info.cmp_arg("-foo"), Ordering::Equal);
     assert_eq!(info.cmp_arg("bar"), Ordering::Less);
     assert_eq!(info.cmp_arg("-bar"), Ordering::Greater);
@@ -87,7 +87,7 @@ fn test_arginfo_cmp() {
     assert_eq!(info.cmp_arg("-foo="), Ordering::Equal);
     assert_eq!(info.cmp_arg("-foo=bar"), Ordering::Equal);
 
-    let info = take_arg!("-foo", OsString, Concatenated(b'='), Foo);
+    let info = take_arg!("-foo", OsString, Concatenated(b'='), NotCompilation);
     assert_eq!(info.cmp_arg("-foo"), Ordering::Equal);
     assert_eq!(info.cmp_arg("bar"), Ordering::Less);
     assert_eq!(info.cmp_arg("-bar"), Ordering::Greater);
@@ -96,7 +96,7 @@ fn test_arginfo_cmp() {
     assert_eq!(info.cmp_arg("-foo="), Ordering::Equal);
     assert_eq!(info.cmp_arg("-foo=bar"), Ordering::Equal);
 
-    let info = take_arg!("-foo", OsString, CanBeConcatenated(b'='), Foo);
+    let info = take_arg!("-foo", OsString, CanBeConcatenated(b'='), NotCompilation);
     assert_eq!(info.cmp_arg("-foo"), Ordering::Equal);
     assert_eq!(info.cmp_arg("bar"), Ordering::Less);
     assert_eq!(info.cmp_arg("-bar"), Ordering::Greater);
@@ -105,7 +105,7 @@ fn test_arginfo_cmp() {
     assert_eq!(info.cmp_arg("-foo="), Ordering::Equal);
     assert_eq!(info.cmp_arg("-foo=bar"), Ordering::Equal);
 
-    let info = take_arg!("-foo", OsString, CanBeSeparated, Foo);
+    let info = take_arg!("-foo", OsString, CanBeSeparated, NotCompilation);
     assert_eq!(info.cmp_arg("-foo"), Ordering::Equal);
     assert_eq!(info.cmp_arg("bar"), Ordering::Less);
     assert_eq!(info.cmp_arg("-bar"), Ordering::Greater);
@@ -114,7 +114,7 @@ fn test_arginfo_cmp() {
     assert_eq!(info.cmp_arg("-foo="), Ordering::Equal);
     assert_eq!(info.cmp_arg("-foo=bar"), Ordering::Equal);
 
-    let info = take_arg!("-foo", OsString, CanBeSeparated(b'='), Foo);
+    let info = take_arg!("-foo", OsString, CanBeSeparated(b'='), NotCompilation);
     assert_eq!(info.cmp_arg("-foo"), Ordering::Equal);
     assert_eq!(info.cmp_arg("bar"), Ordering::Less);
     assert_eq!(info.cmp_arg("-bar"), Ordering::Greater);
@@ -126,150 +126,85 @@ fn test_arginfo_cmp() {
 
 #[test]
 fn test_arginfo_process() {
-    let info = flag!("-foo", FooFlag);
+    let info = flag!("-foo", TooHardFlag);
     assert_eq!(
         info.process("-foo", || None).unwrap(),
-        arg!(Flag("-foo", FooFlag))
+        arg!(Flag("-foo", TooHardFlag))
     );
 
-    let info = take_arg!("-foo", OsString, Separated, Foo);
+    let info = take_arg!("-foo", OsString, Separated, NotCompilation);
     assert_eq!(
         info.clone().process("-foo", || None).unwrap_err(),
         ArgParseError::UnexpectedEndOfArgs
     );
     assert_eq!(
         info.process("-foo", || Some("bar".into())).unwrap(),
-        arg!(WithValue("-foo", Foo("bar"), Separated))
+        arg!(WithValue("-foo", NotCompilation("bar"), Separated))
     );
 
-    let info = take_arg!("-foo", OsString, Concatenated, Foo);
+    let info = take_arg!("-foo", OsString, Concatenated, NotCompilation);
     assert_eq!(
         info.clone().process("-foo", || None).unwrap(),
-        arg!(WithValue("-foo", Foo(""), Concatenated))
+        arg!(WithValue("-foo", NotCompilation(""), Concatenated))
     );
     assert_eq!(
         info.process("-foobar", || None).unwrap(),
-        arg!(WithValue("-foo", Foo("bar"), Concatenated))
+        arg!(WithValue("-foo", NotCompilation("bar"), Concatenated))
     );
 
-    let info = take_arg!("-foo", OsString, Concatenated(b'='), Foo);
+    let info = take_arg!("-foo", OsString, Concatenated(b'='), NotCompilation);
     assert_eq!(
         info.clone().process("-foo=", || None).unwrap(),
-        arg!(WithValue("-foo", Foo(""), Concatenated(b'=')))
+        arg!(WithValue("-foo", NotCompilation(""), Concatenated(b'=')))
     );
     assert_eq!(
         info.process("-foo=bar", || None).unwrap(),
-        arg!(WithValue("-foo", Foo("bar"), Concatenated(b'=')))
+        arg!(WithValue("-foo", NotCompilation("bar"), Concatenated(b'=')))
     );
 
-    let info = take_arg!("-foo", OsString, CanBeSeparated, Foo);
+    let info = take_arg!("-foo", OsString, CanBeSeparated, NotCompilation);
     assert_eq!(
         info.clone().process("-foo", || None).unwrap(),
-        arg!(WithValue("-foo", Foo(""), Concatenated))
+        arg!(WithValue("-foo", NotCompilation(""), Concatenated))
     );
     assert_eq!(
         info.clone().process("-foobar", || None).unwrap(),
-        arg!(WithValue("-foo", Foo("bar"), CanBeSeparated))
+        arg!(WithValue("-foo", NotCompilation("bar"), CanBeSeparated))
     );
     assert_eq!(
         info.process("-foo", || Some("bar".into())).unwrap(),
-        arg!(WithValue("-foo", Foo("bar"), CanBeConcatenated))
+        arg!(WithValue("-foo", NotCompilation("bar"), CanBeConcatenated))
     );
 
-    let info = take_arg!("-foo", OsString, CanBeSeparated(b'='), Foo);
+    let info = take_arg!("-foo", OsString, CanBeSeparated(b'='), NotCompilation);
     assert_eq!(
         info.clone().process("-foo", || None).unwrap_err(),
         ArgParseError::UnexpectedEndOfArgs
     );
     assert_eq!(
         info.clone().process("-foo=", || None).unwrap(),
-        arg!(WithValue("-foo", Foo(""), CanBeSeparated(b'=')))
+        arg!(WithValue("-foo", NotCompilation(""), CanBeSeparated(b'=')))
     );
     assert_eq!(
         info.clone().process("-foo=bar", || None).unwrap(),
-        arg!(WithValue("-foo", Foo("bar"), CanBeSeparated(b'=')))
+        arg!(WithValue("-foo", NotCompilation("bar"), CanBeSeparated(b'=')))
     );
     assert_eq!(
         info.process("-foo", || Some("bar".into())).unwrap(),
-        arg!(WithValue("-foo", Foo("bar"), CanBeConcatenated(b'=')))
+        arg!(WithValue("-foo", NotCompilation("bar"), CanBeConcatenated(b'=')))
     );
-}
-
-#[test]
-fn test_bsearch() {
-    let data = vec![
-        ("bar", 1),
-        ("foo", 2),
-        ("fuga", 3),
-        ("hoge", 4),
-        ("plop", 5),
-        ("qux", 6),
-        ("zorglub", 7),
-    ];
-    for item in &data {
-        assert_eq!(bsearch(item.0, &data, |i, k| i.0.cmp(k)), Some(item));
-    }
-
-    let data = &data[..6];
-    for item in data {
-        assert_eq!(bsearch(item.0, data, |i, k| i.0.cmp(k)), Some(item));
-    }
-
-    let data = vec![
-        ("a", 1),
-        ("ab", 2),
-        ("abc", 3),
-        ("abd", 4),
-        ("abe", 5),
-        ("abef", 6),
-        ("abefg", 7),
-    ];
-    for item in &data {
-        assert_eq!(
-            bsearch(item.0, &data, |i, k| if k.starts_with(i.0) {
-                Ordering::Equal
-            } else {
-                i.0.cmp(k)
-            }),
-            Some(item)
-        );
-    }
-
-    let data = &data[..6];
-    for item in data {
-        assert_eq!(
-            bsearch(item.0, data, |i, k| if k.starts_with(i.0) {
-                Ordering::Equal
-            } else {
-                i.0.cmp(k)
-            }),
-            Some(item)
-        );
-    }
 }
 
 #[test]
 fn test_argsiter() {
-    ArgData! {
-        Bar,
-        Foo(OsString),
-        Fuga,
-        Hoge(PathBuf),
-        Plop,
-        Qux(OsString),
-        Zorglub,
-    }
-
-    // Need to explicitly refer to enum because `use` doesn't work if it's in a module
-    // https://internals.rust-lang.org/t/pre-rfc-support-use-enum-for-function-local-enums/3853/13
-    static ARGS: [ArgInfo<ArgData>; 7] = [
-        flag!("-bar", ArgData::Bar),
-        take_arg!("-foo", OsString, Separated, ArgData::Foo),
-        flag!("-fuga", ArgData::Fuga),
-        take_arg!("-hoge", PathBuf, Concatenated, ArgData::Hoge),
-        flag!("-plop", ArgData::Plop),
-        take_arg!("-qux", OsString, CanBeSeparated(b'='), ArgData::Qux),
-        flag!("-zorglub", ArgData::Zorglub),
+    static ARGS: [ArgInfo; 7] = [
+        flag!("-bar", ArgData::TooHardFlag),
+        take_arg!("-foo", OsString, Separated, ArgData::NotCompilation),
+        flag!("-fuga", ArgData::NotCompilationFlag),
+        take_arg!("-hoge", PathBuf, Concatenated, ArgData::TooHardPath),
+        flag!("-plop", ArgData::TooHardFlag),
+        take_arg!("-qux", OsString, CanBeSeparated(b'='), ArgData::PassThrough),
+        flag!("-zorglub", ArgData::NotCompilationFlag),
     ];
 
     let args = [
@@ -292,22 +227,22 @@ fn test_argsiter() {
         .collect();
     let expected = vec![
         arg!(UnknownFlag("-nomatch")),
-        arg!(WithValue("-foo", ArgData::Foo("value"), Separated)),
-        arg!(WithValue("-hoge", ArgData::Hoge(""), Concatenated)),
+        arg!(WithValue("-foo", ArgData::NotCompilation("value"), Separated)),
+        arg!(WithValue("-hoge", ArgData::TooHardPath(""), Concatenated)),
         arg!(Raw("value")),
-        arg!(WithValue("-hoge", ArgData::Hoge("=value"), Concatenated)),
-        arg!(WithValue("-hoge", ArgData::Hoge("value"), Concatenated)),
-        arg!(Flag("-zorglub", ArgData::Zorglub)),
+        arg!(WithValue("-hoge", ArgData::TooHardPath("=value"), Concatenated)),
+        arg!(WithValue("-hoge", ArgData::TooHardPath("value"), Concatenated)),
+        arg!(Flag("-zorglub", ArgData::NotCompilationFlag)),
         arg!(WithValue(
             "-qux",
-            ArgData::Qux("value"),
+            ArgData::PassThrough("value"),
             CanBeConcatenated(b'=')
         )),
-        arg!(Flag("-plop", ArgData::Plop)),
+        arg!(Flag("-plop", ArgData::TooHardFlag)),
         arg!(UnknownFlag("-quxbar")),
         arg!(WithValue(
             "-qux",
-            ArgData::Qux("value"),
+            ArgData::PassThrough("value"),
             CanBeSeparated(b'=')
         )),
     ];
@@ -316,42 +251,42 @@ fn test_argsiter() {
 
 #[test]
 fn test_argument_into_iter() {
-    let raw: Argument<ArgData> = arg!(Raw("value"));
-    let unknown: Argument<ArgData> = arg!(UnknownFlag("-foo"));
+    let raw: Argument = arg!(Raw("value"));
+    let unknown: Argument = arg!(UnknownFlag("-foo"));
     assert_eq!(raw.iter_os_strings().collect::<Vec<_>>(), ovec!["value"]);
     assert_eq!(unknown.iter_os_strings().collect::<Vec<_>>(), ovec!["-foo"]);
     assert_eq!(
-        arg!(Flag("-foo", FooFlag))
+        arg!(Flag("-foo", TooHardFlag))
             .iter_os_strings()
             .collect::<Vec<_>>(),
         ovec!["-foo"]
     );
 
-    let arg = arg!(WithValue("-foo", Foo("bar"), Concatenated));
+    let arg = arg!(WithValue("-foo", NotCompilation("bar"), Concatenated));
     assert_eq!(arg.iter_os_strings().collect::<Vec<_>>(), ovec!["-foobar"]);
 
-    let arg = arg!(WithValue("-foo", Foo("bar"), Concatenated(b'=')));
+    let arg = arg!(WithValue("-foo", NotCompilation("bar"), Concatenated(b'=')));
     assert_eq!(arg.iter_os_strings().collect::<Vec<_>>(), ovec!["-foo=bar"]);
 
-    let arg = arg!(WithValue("-foo", Foo("bar"), CanBeSeparated));
+    let arg = arg!(WithValue("-foo", NotCompilation("bar"), CanBeSeparated));
     assert_eq!(arg.iter_os_strings().collect::<Vec<_>>(), ovec!["-foobar"]);
 
-    let arg = arg!(WithValue("-foo", Foo("bar"), CanBeSeparated(b'=')));
+    let arg = arg!(WithValue("-foo", NotCompilation("bar"), CanBeSeparated(b'=')));
     assert_eq!(arg.iter_os_strings().collect::<Vec<_>>(), ovec!["-foo=bar"]);
 
-    let arg = arg!(WithValue("-foo", Foo("bar"), CanBeConcatenated));
+    let arg = arg!(WithValue("-foo", NotCompilation("bar"), CanBeConcatenated));
     assert_eq!(
         arg.iter_os_strings().collect::<Vec<_>>(),
         ovec!["-foo", "bar"]
     );
 
-    let arg = arg!(WithValue("-foo", Foo("bar"), CanBeConcatenated(b'=')));
+    let arg = arg!(WithValue("-foo", NotCompilation("bar"), CanBeConcatenated(b'=')));
     assert_eq!(
         arg.iter_os_strings().collect::<Vec<_>>(),
         ovec!["-foo", "bar"]
     );
 
-    let arg = arg!(WithValue("-foo", Foo("bar"), Separated));
+    let arg = arg!(WithValue("-foo", NotCompilation("bar"), Separated));
     assert_eq!(
         arg.iter_os_strings().collect::<Vec<_>>(),
         ovec!["-foo", "bar"]
@@ -360,7 +295,8 @@ fn test_argument_into_iter() {
 
 #[test]
 fn test_arginfo_process_take_concat_arg_delim_doesnt_crash() {
-    let _ = take_arg!("-foo", OsString, Concatenated(b'='), Foo).process("-foo", || None);
+    let _ = take_arg!("-foo", OsString, Concatenated(b'='), NotCompilation)
+        .process("-foo", || None);
 }
 
 #[cfg(debug_assertions)]
@@ -370,13 +306,13 @@ mod assert_tests {
     #[test]
     #[should_panic]
     fn test_arginfo_process_flag() {
-        flag!("-foo", FooFlag).process("-bar", || None).unwrap();
+        flag!("-foo", TooHardFlag).process("-bar", || None).unwrap();
     }
 
     #[test]
     #[should_panic]
     fn test_arginfo_process_take_arg() {
-        take_arg!("-foo", OsString, Separated, Foo)
+        take_arg!("-foo", OsString, Separated, NotCompilation)
             .process("-bar", || None)
             .unwrap();
     }
@@ -384,7 +320,7 @@ mod assert_tests {
     #[test]
     #[should_panic]
     fn test_arginfo_process_take_concat_arg() {
-        take_arg!("-foo", OsString, Concatenated, Foo)
+        take_arg!("-foo", OsString, Concatenated, NotCompilation)
             .process("-bar", || None)
             .unwrap();
     }
@@ -392,7 +328,7 @@ mod assert_tests {
     #[test]
     #[should_panic]
     fn test_arginfo_process_take_concat_arg_delim() {
-        take_arg!("-foo", OsString, Concatenated(b'='), Foo)
+        take_arg!("-foo", OsString, Concatenated(b'='), NotCompilation)
             .process("-bar", || None)
             .unwrap();
     }
@@ -400,7 +336,7 @@ mod assert_tests {
     #[test]
     #[should_panic]
     fn test_arginfo_process_take_maybe_concat_arg() {
-        take_arg!("-foo", OsString, CanBeSeparated, Foo)
+        take_arg!("-foo", OsString, CanBeSeparated, NotCompilation)
             .process("-bar", || None)
             .unwrap();
     }
@@ -408,7 +344,7 @@ mod assert_tests {
     #[test]
     #[should_panic]
     fn test_arginfo_process_take_maybe_concat_arg_delim() {
-        take_arg!("-foo", OsString, CanBeSeparated(b'='), Foo)
+        take_arg!("-foo", OsString, CanBeSeparated(b'='), NotCompilation)
             .process("-bar", || None)
             .unwrap();
     }
@@ -416,20 +352,20 @@ mod assert_tests {
     #[test]
     #[should_panic]
     fn test_args_iter_unsorted() {
-        static ARGS: [ArgInfo<ArgData>; 2] = [flag!("-foo", FooFlag), flag!("-bar", FooFlag)];
+        static ARGS: [ArgInfo; 2] = [flag!("-foo", TooHardFlag), flag!("-bar", TooHardFlag)];
         ArgsIter::new(Vec::<OsString>::new().into_iter(), &ARGS[..]);
     }
 
     #[test]
     #[should_panic]
     fn test_args_iter_unsorted_2() {
-        static ARGS: [ArgInfo<ArgData>; 2] = [flag!("-foo", FooFlag), flag!("-foo", FooFlag)];
+        static ARGS: [ArgInfo; 2] = [flag!("-foo", TooHardFlag), flag!("-foo", TooHardFlag)];
         ArgsIter::new(Vec::<OsString>::new().into_iter(), &ARGS[..]);
     }
 
     #[test]
     fn test_args_iter_no_conflict() {
-        static ARGS: [ArgInfo<ArgData>; 2] = [flag!("-foo", FooFlag), flag!("-fooz", FooFlag)];
+        static ARGS: [ArgInfo; 2] = [flag!("-foo", TooHardFlag), flag!("-fooz", TooHardFlag)];
         ArgsIter::new(Vec::<OsString>::new().into_iter(), &ARGS[..]);
     }
 }
