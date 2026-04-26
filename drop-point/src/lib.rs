@@ -82,7 +82,7 @@ fn plan_third_party_cache(rest: &[OsString]) -> Option<(ParsedArguments, String)
         ParseOutcome::NotCompilation => return None,
     };
     if !is_third_party(&parsed.input) {
-        debug!("skip {}: workspace crate", parsed.crate_name);
+        debug!("skip first party {}: workspace crate", parsed.crate_name);
         return None;
     }
     let mut hasher = Hasher::new();
