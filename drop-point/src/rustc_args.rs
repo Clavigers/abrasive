@@ -6,8 +6,6 @@ use log::debug;
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use std::ffi::OsString;
-use std::fmt::Debug;
-use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 use std::str;
 use std::sync::LazyLock;
@@ -56,26 +54,22 @@ pub enum ArgDisposition {
     Concatenated(Delimiter),
 }
 
-/// Representation of a parsed argument
-/// The type parameter T contains the parsed information for this argument,
-/// for use during argument handling (typically an enum to allow switching
-/// on the different kinds of argument). `Flag`s may contain a simple
-/// variant which influences how to do caching, whereas `WithValue`s could
-/// be a struct variant with parsed data from the value.
-#[derive(PartialEq, Eq, Clone, Debug)]
-pub enum Argument<T> {
+/// A parsed argument. Known flags carry an `ArgData` payload identifying
+/// which flag matched (and, for `WithValue`, its parsed value).
+#[derive(PartialEq, Clone, Debug)]
+pub enum Argument {
     /// Unknown non-flag argument; e.g. "foo"
     Raw(OsString),
     /// Unknown flag argument; e.g. "-foo"
     UnknownFlag(OsString),
     /// Known flag argument; e.g. "-bar"
-    Flag(&'static str, T),
+    Flag(&'static str, ArgData),
     /// Known argument with a value; e.g. "-qux bar", where the way the
     /// value is passed is described by the ArgDisposition type.
-    WithValue(&'static str, T, ArgDisposition),
+    WithValue(&'static str, ArgData, ArgDisposition),
 }
 
-impl<T: ArgumentValue> Argument<T> {
+impl Argument {
     /// Pick a single canonical spelling for arguments cargo could have
     /// written either way: `--flag=value` and `--flag value` both come out
     /// as the two-argv-element form. Lets downstream consumers (the
@@ -99,7 +93,7 @@ impl<T: ArgumentValue> Argument<T> {
         }
     }
 
-    pub fn get_data(&self) -> Option<&T> {
+    pub fn get_data(&self) -> Option<&ArgData> {
         match *self {
             Argument::Flag(_, ref d) => Some(d),
             Argument::WithValue(_, ref d, _) => Some(d),
@@ -108,7 +102,7 @@ impl<T: ArgumentValue> Argument<T> {
     }
 
     /// Transforms a parsed argument into an iterator.
-    pub fn iter_os_strings(&self) -> Iter<'_, T> {
+    pub fn iter_os_strings(&self) -> Iter<'_> {
         Iter {
             arg: self,
             emitted: 0,
@@ -116,12 +110,12 @@ impl<T: ArgumentValue> Argument<T> {
     }
 }
 
-pub struct Iter<'a, T> {
-    arg: &'a Argument<T>,
+pub struct Iter<'a> {
+    arg: &'a Argument,
     emitted: usize,
 }
 
-impl<T: ArgumentValue> Iterator for Iter<'_, T> {
+impl Iterator for Iter<'_> {
     type Item = OsString;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -151,9 +145,9 @@ fn emit_flag(s: &'static str, emitted: usize) -> Option<OsString> {
     }
 }
 
-fn emit_with_value<T: ArgumentValue>(
+fn emit_with_value(
     flag: &'static str,
-    value: &T,
+    value: &ArgData,
     disposition: &ArgDisposition,
     emitted: usize,
 ) -> Option<OsString> {
@@ -171,7 +165,7 @@ fn emit_with_value<T: ArgumentValue>(
     }
 }
 
-fn emit_concatenated<T: ArgumentValue>(flag: &str, value: &T, delim: Delimiter) -> OsString {
+fn emit_concatenated(flag: &str, value: &ArgData, delim: Delimiter) -> OsString {
     let mut s = OsString::from(flag);
     let v = value.clone().into_arg_os_string();
     if let Some(d) = delim
@@ -186,6 +180,7 @@ fn emit_concatenated<T: ArgumentValue>(flag: &str, value: &T, delim: Delimiter) 
 /// Generates the `ArgData` enum and an `IntoArg` impl that delegates each
 /// variant to its inner value, so adding a new variant is one line in the
 /// macro call instead of one new match arm per IntoArg method.
+#[macro_export]
 macro_rules! ArgData {
     // Collected all the arms, time to create the match
     { __matchify $var:ident $fn:ident ($( $fnarg:ident )*) ($( $arms:tt )*) } => {
@@ -195,7 +190,7 @@ macro_rules! ArgData {
     };
     // Unit variant
     { __matchify $var:ident $fn:ident ($( $fnarg:ident )*) ($( $arms:tt )*) $x:ident, $( $rest:tt )* } => {
-        ArgData!{
+        $crate::ArgData!{
             __matchify $var $fn ($($fnarg)*)
             ($($arms)* ArgData::$x => ().$fn($( $fnarg )*),)
             $($rest)*
@@ -203,7 +198,7 @@ macro_rules! ArgData {
     };
     // Tuple variant
     { __matchify $var:ident $fn:ident ($( $fnarg:ident )*) ($( $arms:tt )*) $x:ident($y:ty), $( $rest:tt )* } => {
-        ArgData!{
+        $crate::ArgData!{
             __matchify $var $fn ($($fnarg)*)
             ($($arms)* ArgData::$x(inner) => inner.$fn($( $fnarg )*),)
             $($rest)*
@@ -211,9 +206,9 @@ macro_rules! ArgData {
     };
 
     { __impl $( $tok:tt )+ } => {
-        impl IntoArg for ArgData {
-            fn into_arg_os_string(self) -> OsString {
-                ArgData!{ __matchify self into_arg_os_string () () $($tok)+ }
+        impl $crate::rustc_args::IntoArg for ArgData {
+            fn into_arg_os_string(self) -> ::std::ffi::OsString {
+                $crate::ArgData!{ __matchify self into_arg_os_string () () $($tok)+ }
             }
         }
     };
@@ -224,7 +219,7 @@ macro_rules! ArgData {
         pub enum ArgData {
             $($tok)+
         }
-        ArgData!{ __impl $( $tok )+ }
+        $crate::ArgData!{ __impl $( $tok )+ }
     };
     { $( $tok:tt )+ } => {
         #[derive(Clone, Debug, PartialEq)]
@@ -232,14 +227,9 @@ macro_rules! ArgData {
         enum ArgData {
             $($tok)+
         }
-        ArgData!{ __impl $( $tok )+ }
+        $crate::ArgData!{ __impl $( $tok )+ }
     };
 }
-
-/// The value associated with a parsed argument.
-pub trait ArgumentValue: IntoArg + Clone + Debug {}
-
-impl<T: IntoArg + Clone + Debug> ArgumentValue for T {}
 
 pub trait FromArg: Sized {
     fn process(arg: OsString) -> ArgParseResult<Self>;
@@ -295,30 +285,30 @@ pub fn split_os_string_arg(val: OsString, split: &str) -> ArgParseResult<(String
 }
 
 /// The description of how an argument may be parsed
-#[derive(PartialEq, Eq, Clone, Debug)]
+#[derive(PartialEq, Clone, Debug)]
 #[allow(unpredictable_function_pointer_comparisons)]
-pub enum ArgInfo<T> {
+pub enum ArgInfo {
     /// An simple flag argument, of the form "-foo"
-    Flag(&'static str, T),
+    Flag(&'static str, ArgData),
     /// An argument with a value; e.g. "-qux bar", where the way the
     /// value is passed is described by the ArgDisposition type.
     TakeArg(
         &'static str,
-        fn(OsString) -> ArgParseResult<T>,
+        fn(OsString) -> ArgParseResult<ArgData>,
         ArgDisposition,
     ),
 }
 
-impl<T: ArgumentValue> ArgInfo<T> {
+impl ArgInfo {
     /// Transform an argument description into a parsed Argument, given a
     /// string. For arguments with a value, where the value is separate, the
     /// `get_next_arg` function returns the next argument, in raw `OsString`
     /// form.
-    fn process(
+    pub fn process(
         self,
         arg: &str,
         get_next_arg: impl FnOnce() -> Option<OsString>,
-    ) -> ArgParseResult<Argument<T>> {
+    ) -> ArgParseResult<Argument> {
         match self {
             ArgInfo::Flag(s, variant) => process_flag(s, arg, variant),
             ArgInfo::TakeArg(s, create, disposition) => {
@@ -327,9 +317,12 @@ impl<T: ArgumentValue> ArgInfo<T> {
         }
     }
 
-    /// Returns whether the given string matches the argument description, and
-    /// if not, how it differs.
-    fn cmp(&self, arg: &str) -> Ordering {
+    /// Compare this `ArgInfo` against an argv string for the binary search
+    /// in `search`. Returns `Equal` when the string is (or could be) this
+    /// flag's argv form, otherwise the lexical ordering between the two for
+    /// the search to recurse on. Not a total ordering over `ArgInfo` values,
+    /// hence not `Ord`.
+    pub fn cmp_arg(&self, arg: &str) -> Ordering {
         let s = self.flag_str();
         match self {
             ArgInfo::TakeArg(
@@ -347,20 +340,20 @@ impl<T: ArgumentValue> ArgInfo<T> {
         }
     }
 
-    fn flag_str(&self) -> &'static str {
+    pub fn flag_str(&self) -> &'static str {
         match self {
             &ArgInfo::Flag(s, _) | &ArgInfo::TakeArg(s, _, _) => s,
         }
     }
 }
 
-fn process_take_arg<T: ArgumentValue>(
+fn process_take_arg(
     s: &'static str,
     arg: &str,
-    create: fn(OsString) -> ArgParseResult<T>,
+    create: fn(OsString) -> ArgParseResult<ArgData>,
     disposition: ArgDisposition,
     get_next_arg: impl FnOnce() -> Option<OsString>,
-) -> ArgParseResult<Argument<T>> {
+) -> ArgParseResult<Argument> {
     match disposition {
         ArgDisposition::Separated => process_separated(s, arg, create, get_next_arg),
         ArgDisposition::Concatenated(d) => process_concatenated(s, arg, create, d),
@@ -370,17 +363,17 @@ fn process_take_arg<T: ArgumentValue>(
     }
 }
 
-fn process_flag<T>(s: &'static str, arg: &str, variant: T) -> ArgParseResult<Argument<T>> {
+fn process_flag(s: &'static str, arg: &str, variant: ArgData) -> ArgParseResult<Argument> {
     debug_assert_eq!(s, arg);
     Ok(Argument::Flag(s, variant))
 }
 
-fn process_separated<T>(
+fn process_separated(
     s: &'static str,
     arg: &str,
-    create: fn(OsString) -> ArgParseResult<T>,
+    create: fn(OsString) -> ArgParseResult<ArgData>,
     get_next_arg: impl FnOnce() -> Option<OsString>,
-) -> ArgParseResult<Argument<T>> {
+) -> ArgParseResult<Argument> {
     debug_assert_eq!(s, arg);
     let next = get_next_arg().ok_or(ArgParseError::UnexpectedEndOfArgs)?;
     Ok(Argument::WithValue(
@@ -390,12 +383,12 @@ fn process_separated<T>(
     ))
 }
 
-fn process_concatenated<T>(
+fn process_concatenated(
     s: &'static str,
     arg: &str,
-    create: fn(OsString) -> ArgParseResult<T>,
+    create: fn(OsString) -> ArgParseResult<ArgData>,
     d: Delimiter,
-) -> ArgParseResult<Argument<T>> {
+) -> ArgParseResult<Argument> {
     let mut len = s.len();
     debug_assert_eq!(&arg[..len], s);
     if let Some(d) = d
@@ -410,13 +403,13 @@ fn process_concatenated<T>(
     ))
 }
 
-fn process_either<T: ArgumentValue>(
+fn process_either(
     s: &'static str,
     arg: &str,
-    create: fn(OsString) -> ArgParseResult<T>,
+    create: fn(OsString) -> ArgParseResult<ArgData>,
     d: Delimiter,
     get_next_arg: impl FnOnce() -> Option<OsString>,
-) -> ArgParseResult<Argument<T>> {
+) -> ArgParseResult<Argument> {
     let derived = if arg == s {
         ArgInfo::TakeArg(s, create, ArgDisposition::Separated)
     } else {
@@ -442,19 +435,17 @@ fn process_either<T: ArgumentValue>(
 
 // todo revisit the design above. I think some of these should be impls on something
 
-/// Binary search for a `key` in a sorted array of items, given a comparison
-/// function. Tweaked to handle prefix matching, where multiple items in the
-/// array might match but the last match is the one actually matching.
-fn bsearch<K, T, F>(key: K, items: &[T], cmp: F) -> Option<&T>
-where
-    F: Fn(&T, &K) -> Ordering,
-{
+/// Binary-search a sorted `ArgInfo` table for the entry matching `key`,
+/// using prefix-aware comparison via `ArgInfo::cmp_arg`. When multiple
+/// entries can match (e.g. `-foo` and `-foobar` both match `-foobar`), the
+/// last (longest) match wins.
+pub fn search<'a>(items: &'a [ArgInfo], key: &str) -> Option<&'a ArgInfo> {
     let mut slice = items;
     while !slice.is_empty() {
         let middle = slice.len() / 2;
-        match cmp(&slice[middle], &key) {
+        match slice[middle].cmp_arg(key) {
             Ordering::Equal => {
-                return bsearch(key, &slice[middle + 1..], cmp).or(Some(&slice[middle]));
+                return search(&slice[middle + 1..], key).or(Some(&slice[middle]));
             }
             Ordering::Greater => slice = &slice[..middle],
             Ordering::Less => slice = &slice[middle + 1..],
@@ -463,64 +454,46 @@ where
     None
 }
 
-/// Trait for generically searching over a "set" of `ArgInfo`s.
-pub trait SearchableArgInfo<T> {
-    fn search(&self, key: &str) -> Option<&ArgInfo<T>>;
-
-    #[cfg(debug_assertions)]
-    fn check(&self) -> bool;
-}
-
-/// Search over a sorted array of `ArgInfo` items.
-impl<T: ArgumentValue> SearchableArgInfo<T> for &'static [ArgInfo<T>] {
-    fn search(&self, key: &str) -> Option<&ArgInfo<T>> {
-        bsearch(key, self, |i, k| i.cmp(k))
-    }
-
-    #[cfg(debug_assertions)]
-    fn check(&self) -> bool {
-        self.windows(2).all(|w| {
-            let a = w[0].flag_str();
-            let b = w[1].flag_str();
-            assert!(a < b, "{} can't precede {}", a, b);
-            true
-        })
-    }
+/// Debug-only assertion that the `ArgInfo` table is sorted by flag string,
+/// a precondition for `search`'s binary search.
+#[cfg(debug_assertions)]
+pub fn check_sorted(items: &[ArgInfo]) -> bool {
+    items.windows(2).all(|w| {
+        let a = w[0].flag_str();
+        let b = w[1].flag_str();
+        assert!(a < b, "{} can't precede {}", a, b);
+        true
+    })
 }
 
 /// An `Iterator` for parsed arguments.
-pub struct ArgsIter<I, T, S>
+pub struct ArgsIter<'a, I>
 where
     I: Iterator<Item = OsString>,
-    S: SearchableArgInfo<T>,
 {
     arguments: I,
-    arg_info: S,
-    phantom: PhantomData<T>,
+    arg_info: &'a [ArgInfo],
 }
 
-impl<I, T, S> ArgsIter<I, T, S>
+impl<'a, I> ArgsIter<'a, I>
 where
     I: Iterator<Item = OsString>,
-    T: ArgumentValue,
-    S: SearchableArgInfo<T>,
 {
     /// Create an `Iterator` for parsed arguments, given an iterator of raw
     /// `OsString` arguments, and argument descriptions.
-    pub fn new(arguments: I, arg_info: S) -> Self {
+    pub fn new(arguments: I, arg_info: &'a [ArgInfo]) -> Self {
         #[cfg(debug_assertions)]
-        debug_assert!(arg_info.check());
+        debug_assert!(check_sorted(arg_info));
         ArgsIter {
             arguments,
             arg_info,
-            phantom: PhantomData,
         }
     }
 
-    fn classify_arg(&mut self, arg: OsString) -> ArgParseResult<Argument<T>> {
+    fn classify_arg(&mut self, arg: OsString) -> ArgParseResult<Argument> {
         let s = arg.to_string_lossy();
         let arguments = &mut self.arguments;
-        match self.arg_info.search(&s) {
+        match search(self.arg_info, &s) {
             Some(i) => i.clone().process(&s, || arguments.next()),
             None if s.starts_with('-') => Ok(Argument::UnknownFlag(arg.clone())),
             None => Ok(Argument::Raw(arg.clone())),
@@ -528,13 +501,11 @@ where
     }
 }
 
-impl<I, T, S> Iterator for ArgsIter<I, T, S>
+impl<I> Iterator for ArgsIter<'_, I>
 where
     I: Iterator<Item = OsString>,
-    T: ArgumentValue,
-    S: SearchableArgInfo<T>,
 {
-    type Item = ArgParseResult<Argument<T>>;
+    type Item = ArgParseResult<Argument>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let arg = self.arguments.next()?;
@@ -545,43 +516,45 @@ where
 /// Helper macro used to define `ArgInfo::Flag`s.
 /// Variant is an enum variant, e.g. `enum ArgType { Variant }`.
 ///
-/// ```ignore
+/// ```text
 /// flag!("-foo", Variant)
 /// ```
+#[macro_export]
 macro_rules! flag {
     ($s:expr, $variant:expr) => {
-        ArgInfo::Flag($s, $variant)
+        $crate::rustc_args::ArgInfo::Flag($s, $variant)
     };
 }
 
 /// Helper macro used to define `ArgInfo::TakeArg`s.
 /// Variant is an enum variant, e.g. `enum ArgType { Variant(OsString) }`.
 ///
-/// ```ignore
+/// ```text
 /// take_arg!("-foo", OsString, Separated, Variant)
 /// take_arg!("-foo", OsString, Concatenated, Variant)
 /// take_arg!("-foo", OsString, Concatenated(b'='), Variant)
 /// ```
+#[macro_export]
 macro_rules! take_arg {
     ($s:expr, $vtype:ident, Separated, $variant:expr) => {
-        ArgInfo::TakeArg(
+        $crate::rustc_args::ArgInfo::TakeArg(
             $s,
-            |arg: OsString| $vtype::process(arg).map($variant),
-            ArgDisposition::Separated,
+            |arg: ::std::ffi::OsString| $vtype::process(arg).map($variant),
+            $crate::rustc_args::ArgDisposition::Separated,
         )
     };
     ($s:expr, $vtype:ident, $d:ident, $variant:expr) => {
-        ArgInfo::TakeArg(
+        $crate::rustc_args::ArgInfo::TakeArg(
             $s,
-            |arg: OsString| $vtype::process(arg).map($variant),
-            ArgDisposition::$d(None),
+            |arg: ::std::ffi::OsString| $vtype::process(arg).map($variant),
+            $crate::rustc_args::ArgDisposition::$d(None),
         )
     };
     ($s:expr, $vtype:ident, $d:ident($x:expr), $variant:expr) => {
-        ArgInfo::TakeArg(
+        $crate::rustc_args::ArgInfo::TakeArg(
             $s,
-            |arg: OsString| $vtype::process(arg).map($variant),
-            ArgDisposition::$d(Some($x)),
+            |arg: ::std::ffi::OsString| $vtype::process(arg).map($variant),
+            $crate::rustc_args::ArgDisposition::$d(Some($x)),
         )
     };
 }
@@ -595,12 +568,12 @@ pub enum ColorMode {
     Auto,
 }
 
-/// Possible results of parsing argv. Generic over `T` so the same outcome
-/// shape works for any flag-set parser, not just rustc's.
-#[derive(Debug, PartialEq, Eq)]
-pub enum ParseOutcome<T> {
+/// Possible results of parsing argv.
+#[derive(Debug, PartialEq)]
+#[allow(clippy::large_enum_variant)]
+pub enum ParseOutcome {
     /// Commandline can be handled.
-    Ok(T),
+    Ok(ParsedArguments),
     /// Cannot cache this compilation.
     CannotCache(&'static str, Option<String>),
     /// This commandline is not a compile.
@@ -629,49 +602,48 @@ macro_rules! try_or_cannot_cache {
 // Concrete rustc argument parsing
 // =============================================================================
 //
-// Everything above is generic over the argument-data type T and could parse
-// any flag-style CLI. Below is the rustc-specific layer: the ParsedArguments
-// struct (the typed result of parsing a rustc invocation), the ArgData enum
-// that names each typed value rustc cares about, the ARGS table that
-// describes every flag rustc accepts, and the parse_arguments function that
-// walks an argv into a ParsedArguments.
+// Below is the rustc-specific layer: the ParsedArguments struct (the typed
+// result of parsing a rustc invocation), the ArgData enum that names each
+// typed value rustc cares about, the ARGS table that describes every flag
+// rustc accepts, and the parse_arguments function that walks an argv into a
+// ParsedArguments.
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct ParsedArguments {
     /// The full commandline, with all parsed arguments.
-    pub(crate) arguments: Vec<Argument<ArgData>>,
+    pub arguments: Vec<Argument>,
     /// The input source file. For third-party crates this path embeds
     /// `<registry>/<crate>@<version>/...`, which is sufficient to identify
     /// the source bytes (crates.io is immutable).
-    pub(crate) input: PathBuf,
+    pub input: PathBuf,
     /// The location of compiler outputs.
-    pub(crate) output_dir: PathBuf,
+    pub output_dir: PathBuf,
     /// Paths to extern crates used in the compile. Sorted (cargo doesn't
     /// guarantee --extern ordering and we need deterministic hash inputs).
-    pub(crate) externs: Vec<PathBuf>,
+    pub externs: Vec<PathBuf>,
     /// The directories searched for rlibs.
-    crate_link_paths: Vec<PathBuf>,
+    pub crate_link_paths: Vec<PathBuf>,
     /// Static libraries linked to in the compile.
-    pub(crate) staticlibs: Vec<PathBuf>,
+    pub staticlibs: Vec<PathBuf>,
     /// The crate name passed to --crate-name.
-    pub(crate) crate_name: String,
+    pub crate_name: String,
     /// The crate types that will be generated.
-    crate_types: CrateTypes,
+    pub crate_types: CrateTypes,
     /// If dependency info is being emitted, the name of the dep info file.
-    pub(crate) dep_info: Option<PathBuf>,
+    pub dep_info: Option<PathBuf>,
     /// If `-C profile-use=PATH` was passed, the path to the profile data file.
     /// See https://doc.rust-lang.org/rustc/profile-guided-optimization.html
-    pub(crate) profile: Option<PathBuf>,
+    pub profile: Option<PathBuf>,
     /// Set of `--emit` modes requested.
     /// rustc says it emits .rlib for `--emit=metadata`,
     /// see https://github.com/rust-lang/rust/issues/54852
-    pub(crate) emit: HashSet<String>,
+    pub emit: HashSet<String>,
     /// The value of any `--color` option passed on the commandline.
-    color_mode: ColorMode,
+    pub color_mode: ColorMode,
     /// Whether `--json` was passed to this invocation.
-    has_json: bool,
+    pub has_json: bool,
     /// A `--target` parameter that specifies a path to a JSON file.
-    pub(crate) target_json: Option<PathBuf>,
+    pub target_json: Option<PathBuf>,
 }
 
 /// The selection of crate types for this compilation.
@@ -698,7 +670,7 @@ macro_rules! make_os_string {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct ArgCrateTypes {
+pub struct ArgCrateTypes {
     rlib: bool,
     staticlib: bool,
     others: HashSet<String>,
@@ -747,7 +719,7 @@ impl IntoArg for ArgCrateTypes {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct ArgLinkLibrary {
+pub struct ArgLinkLibrary {
     kind: String,
     name: String,
 }
@@ -771,7 +743,7 @@ impl IntoArg for ArgLinkLibrary {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct ArgLinkPath {
+pub struct ArgLinkPath {
     kind: String,
     path: PathBuf,
 }
@@ -798,7 +770,7 @@ impl IntoArg for ArgLinkPath {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct ArgCodegen {
+pub struct ArgCodegen {
     opt: String,
     value: Option<String>,
 }
@@ -822,7 +794,7 @@ impl IntoArg for ArgCodegen {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct ArgUnstable {
+pub struct ArgUnstable {
     opt: String,
     value: Option<String>,
 }
@@ -846,7 +818,7 @@ impl IntoArg for ArgUnstable {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct ArgExtern {
+pub struct ArgExtern {
     name: String,
     path: PathBuf,
 }
@@ -872,7 +844,7 @@ impl IntoArg for ArgExtern {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-enum ArgTarget {
+pub enum ArgTarget {
     Name(String),
     Path(PathBuf),
     Unsure(OsString),
@@ -939,7 +911,7 @@ use self::ArgData::*;
 
 // Taken from rustc's `rustc_optgroups()`:
 // https://github.com/rust-lang/rust/blob/597d9e43be882cdbd218e58c4f7efb2fa3da7540/compiler/rustc_session/src/config.rs#L1764
-static ARGS: &[ArgInfo<ArgData>] = &[
+static ARGS: &[ArgInfo] = &[
     flag!("-", TooHardFlag),
     take_arg!("--allow", OsString, CanBeSeparated(b'='), PassThrough),
     take_arg!("--cap-lints", OsString, CanBeSeparated(b'='), PassThrough),
@@ -1019,7 +991,7 @@ static ARGS: &[ArgInfo<ArgData>] = &[
 /// * We only support `link` and `dep-info` in --emit (and don't support *just* 'dep-info')
 /// * We require `--out-dir`.
 /// * We don't support `-o file`.
-pub fn parse_arguments(arguments: &[OsString], cwd: &Path) -> ParseOutcome<ParsedArguments> {
+pub fn parse_arguments(arguments: &[OsString], cwd: &Path) -> ParseOutcome {
     let mut args = vec![];
 
     let mut emit: Option<HashSet<String>> = None;
@@ -1242,11 +1214,3 @@ pub fn parse_arguments(arguments: &[OsString], cwd: &Path) -> ParseOutcome<Parse
         target_json,
     })
 }
-
-#[cfg(test)]
-#[path = "rustc_args_tests.rs"]
-mod tests;
-
-#[cfg(test)]
-#[path = "rustc_args_parser_tests.rs"]
-mod parser_tests;

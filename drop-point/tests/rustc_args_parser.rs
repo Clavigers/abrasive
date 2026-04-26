@@ -1,6 +1,10 @@
-use super::*;
+use drop_point::rustc_args::{
+    ArgData, ArgDisposition, ArgTarget, Argument, ColorMode, ParseOutcome, parse_arguments,
+};
+use std::ffi::OsString;
+use std::path::PathBuf;
 
-fn _parse_arguments(arguments: &[String]) -> ParseOutcome<ParsedArguments> {
+fn _parse_arguments(arguments: &[String]) -> ParseOutcome {
     let arguments = arguments.iter().map(OsString::from).collect::<Vec<_>>();
     parse_arguments(&arguments, ".".as_ref())
 }
