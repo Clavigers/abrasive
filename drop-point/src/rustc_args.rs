@@ -1244,9 +1244,9 @@ pub fn parse_arguments(arguments: &[OsString], cwd: &Path) -> ParseOutcome<Parse
 }
 
 #[cfg(test)]
-#[path = "rustc_args_tests.rs"]
+#[path = "tests/rustc_args_tests.rs"]
 mod tests;
 
 #[cfg(test)]
-#[path = "rustc_args_parser_tests.rs"]
+#[path = "tests/rustc_args_parser_tests.rs"]
 mod parser_tests;

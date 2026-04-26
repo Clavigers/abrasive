@@ -83,3 +83,7 @@ fn hash_basenames<'a>(names: impl Iterator<Item = &'a OsStr>, m: &mut blake3::Ha
         m.update(b"\0");
     }
 }
+
+#[cfg(test)]
+#[path = "tests/digest_tests.rs"]
+mod tests;
