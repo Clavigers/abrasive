@@ -4,7 +4,8 @@ use log::{debug, error, info, warn};
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::os::unix::process::CommandExt;
+use std::path::PathBuf;
 use std::process::{Command, exit};
 
 pub mod cache_io;
@@ -17,14 +18,63 @@ use digest::hash_rustc_args;
 use disk_cache::DiskCache;
 use rustc_args::{ParseOutcome, ParsedArguments, parse_arguments};
 
-/// Entry point for the `drop-point` binary. Initializes logging, parses the
-/// rustc invocation cargo handed us, tries the cache, falls back to running
-/// rustc and caching the result. `exit`s the process with the appropriate
-/// code rather than returning.
+/// Entry point for the `drop-point` binary. Initializes logging, classifies
+/// the rustc-wrapper chain shape cargo handed us, and either exec's rustc
+/// directly (workspace crates) or runs the cache logic (third-party crates).
+/// `exit`s the process with the appropriate code rather than returning.
 pub fn run() -> ! {
     init_logger();
-    let (rustc, rest) = parse_args();
-    let plan = plan_third_party_cache(&rest);
+    let argv: Vec<OsString> = env::args_os().collect();
+    let ws_wrapper = env::var_os("RUSTC_WORKSPACE_WRAPPER");
+    let Some(shape) = classify(&argv, ws_wrapper.as_deref()) else {
+        error!("drop-point: must be used as a rustc wrapper");
+        exit(2);
+    };
+    match shape {
+        ChainShape::Workspace { rustc, rest } => exec_rustc(&rustc, &rest),
+        ChainShape::Cache { rustc, rest } => cache_path(rustc, rest),
+    }
+}
+
+/// Whether cargo invoked us in the workspace shape (`drop-point
+/// drop-point-skip rustc <args>`) or the third-party shape (`drop-point rustc
+/// <args>`). Cargo decides; we observe.
+#[derive(Debug, PartialEq, Eq)]
+pub enum ChainShape {
+    /// argv[1] is the workspace wrapper. Skip caching, exec rustc directly.
+    Workspace { rustc: OsString, rest: Vec<OsString> },
+    /// argv[1] is rustc itself. Run the cache path.
+    Cache { rustc: OsString, rest: Vec<OsString> },
+}
+
+/// Classify the wrapper chain from argv plus the value of
+/// `RUSTC_WORKSPACE_WRAPPER`. Returns `None` only when argv has no
+/// arguments past argv[0] (drop-point invoked with no rustc behind it).
+pub fn classify(argv: &[OsString], workspace_wrapper: Option<&OsStr>) -> Option<ChainShape> {
+    let arg1 = argv.get(1)?;
+    if let Some(ws) = workspace_wrapper
+        && arg1.as_os_str() == ws
+    {
+        let rustc = argv.get(2)?.clone();
+        let rest = argv.get(3..).unwrap_or(&[]).to_vec();
+        return Some(ChainShape::Workspace { rustc, rest });
+    }
+    let rustc = arg1.clone();
+    let rest = argv.get(2..).unwrap_or(&[]).to_vec();
+    Some(ChainShape::Cache { rustc, rest })
+}
+
+fn exec_rustc(rustc: &OsStr, rest: &[OsString]) -> ! {
+    let err = Command::new(rustc).args(rest).exec();
+    error!(
+        "drop-point: failed to exec {}: {err}",
+        rustc.to_string_lossy()
+    );
+    exit(2);
+}
+
+fn cache_path(rustc: OsString, rest: Vec<OsString>) -> ! {
+    let plan = plan_cache(&rest);
     if let Some((parsed, key)) = &plan
         && try_serve_from_cache(&rustc, &rest, parsed, key)
     {
@@ -56,18 +106,7 @@ fn init_logger() {
         .init();
 }
 
-fn parse_args() -> (OsString, Vec<OsString>) {
-    let mut args = env::args_os();
-    args.next();
-    let Some(rustc) = args.next() else {
-        error!("drop-point: must be used as a rustc wrapper!");
-        exit(2);
-    };
-    let rest: Vec<_> = args.collect();
-    (rustc, rest)
-}
-
-fn plan_third_party_cache(rest: &[OsString]) -> Option<(ParsedArguments, String)> {
+fn plan_cache(rest: &[OsString]) -> Option<(ParsedArguments, String)> {
     let cwd = env::current_dir().ok()?;
     let parsed = match parse_arguments(rest, &cwd) {
         ParseOutcome::Ok(p) => p,
@@ -81,10 +120,6 @@ fn plan_third_party_cache(rest: &[OsString]) -> Option<(ParsedArguments, String)
         }
         ParseOutcome::NotCompilation => return None,
     };
-    if !is_third_party(&parsed.input) {
-        debug!("skip {}: workspace crate", parsed.crate_name);
-        return None;
-    }
     let mut hasher = Hasher::new();
     if let Err(e) = hash_rustc_args(&parsed, &mut hasher) {
         warn!("drop-point: hash failed for {}: {e}", parsed.crate_name);
@@ -110,20 +145,6 @@ fn crate_name_from_argv(rest: &[OsString]) -> String {
         }
     }
     "?".to_string()
-}
-
-/// True when the input source is outside every workspace member dir.
-/// `DROP_POINT_WORKSPACE_MEMBERS` is colon-separated absolute paths set by
-/// the daemon from `cargo metadata`. Unset means we don't have authoritative
-/// info, so we fail closed and skip caching.
-fn is_third_party(input: &Path) -> bool {
-    let Some(env) = env::var_os("DROP_POINT_WORKSPACE_MEMBERS") else {
-        return false;
-    };
-    let env = env.to_string_lossy();
-    !env.split(':')
-        .filter(|d| !d.is_empty())
-        .any(|d| input.starts_with(d))
 }
 
 fn try_serve_from_cache(
