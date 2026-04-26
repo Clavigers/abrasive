@@ -1,6 +1,5 @@
 use drop_point::rustc_args::{
-    ArgDisposition, ArgInfo, ArgParseError, ArgParseResult, ArgsIter, Argument, ArgumentValue,
-    FromArg, IntoArg, SearchableArgInfo, bsearch,
+    ArgDisposition, ArgInfo, ArgParseError, ArgsIter, Argument, FromArg, bsearch,
 };
 use drop_point::{ArgData, flag, take_arg};
 use std::cmp::Ordering;
@@ -54,7 +53,6 @@ macro_rules! arg {
 ArgData! {
     FooFlag,
     Foo(OsString),
-    FooPath(PathBuf),
 }
 
 use self::ArgData::*;
