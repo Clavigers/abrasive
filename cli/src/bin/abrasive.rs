@@ -635,10 +635,25 @@ pub struct RunArtifact {
     pub contents: Vec<u8>,
 }
 
+fn format_bytes(n: usize) -> String {
+    if n >= 1_048_576 {
+        format!("{:.1} MB", n as f64 / 1_048_576.0)
+    } else if n >= 1_024 {
+        format!("{:.1} KB", n as f64 / 1_024.0)
+    } else {
+        format!("{} B", n)
+    }
+}
+
 fn stream_build_output(stream: &mut Conn) -> CliResult<(u8, Option<RunArtifact>)> {
     let mut stdout_buf = Vec::<u8>::new();
     let mut stderr_buf = Vec::<u8>::new();
     let mut artifact: Option<RunArtifact> = None;
+    let mut chunk_buf: Vec<u8> = Vec::new();
+    let mut chunk_name: Option<String> = None;
+    let mut total_chunks = 0u32;
+    let mut chunks_received = 0u32;
+    let mut chunk_total_bytes = 0u64;
     loop {
         match recv_frame(stream)? {
             Message::BuildStdout(data) => {
@@ -660,6 +675,32 @@ fn stream_build_output(stream: &mut Conn) -> CliResult<(u8, Option<RunArtifact>)
                     contents.len()
                 );
                 artifact = Some(RunArtifact { name, contents });
+            }
+            Message::ExecutableChunk { name, contents, total_bytes, total_chunks: tc, chunk_index: _ } => {
+                if chunk_buf.is_empty() {
+                    chunk_buf = Vec::with_capacity(total_bytes as usize);
+                    chunk_name = Some(name);
+                    total_chunks = tc;
+                    chunk_total_bytes = total_bytes;
+                }
+                chunk_buf.extend_from_slice(&contents);
+                chunks_received += 1;
+
+                let bar_width: usize = 20;
+                let pct = chunks_received as usize * 100 / total_chunks as usize;
+                let filled = bar_width * chunks_received as usize / total_chunks as usize;
+                let bar = format!("{}{}", "=".repeat(filled), " ".repeat(bar_width - filled));
+
+                if chunks_received > 1 {
+                    eprint!("\x1B[2A\r");
+                }
+                eprintln!("{} {{{}{:>3}%}}", tags::LOCAL, bar, pct);
+                eprintln!("{} {} / {}", tags::LOCAL, format_bytes(chunk_buf.len()), format_bytes(chunk_total_bytes as usize));
+
+                if chunks_received == total_chunks {
+                    let contents = zstd::decode_all(&chunk_buf[..])?;
+                    artifact = Some(RunArtifact { name: chunk_name.take().unwrap(), contents });
+                }
             }
             Message::BuildFinished { exit_code } => {
                 flush_trailing(&mut stdout_buf, &mut io::stdout())?;
