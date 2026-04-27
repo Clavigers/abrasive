@@ -54,6 +54,17 @@ pub enum Message {
         name: String,
         contents: Vec<u8>,
     },
+    /// When sending build artifact after successful build, daemon will
+    /// chunk the data in 64KB packets to send over websockets and client
+    /// will re-assemble packets to full binary.
+    ExecutableChunk {
+        name: String,
+        contents: Vec<u8>,
+        total_bytes: u64,
+        total_chunks: u32,
+        chunk_index: u32,
+    },
+    
 }
 
 impl Message {
@@ -76,6 +87,7 @@ impl Message {
             Message::TipRequest => "TipRequest",
             Message::Tip(_) => "Tip",
             Message::Executable { .. } => "Executable",
+            Message::ExecutableChunk { .. } => "ExecutableChunk",
         }
     }
 
